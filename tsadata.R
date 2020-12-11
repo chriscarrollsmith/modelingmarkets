@@ -7,18 +7,22 @@ library(tidyverse)
 #scales library for axis scaling
 library(scales)
 
-url <- "https://www.tsa.gov/coronavirus/passenger-throughput"
+url_1 <- "https://www.tsa.gov/coronavirus/passenger-throughput"
+url_2 <- "https://www.tsa.gov/coronavirus/passenger-throughput?page=1"
 
+scrape_table <- function(url){
 tsa_raw <- as.data.frame(url %>%
                            read_html() %>% #pull all HTML from the webpage
                            html_nodes(xpath = '//*[@id="block-mainpagecontent"]/div/div/div[2]/table') %>% 
                            html_table()) #get table using XPath copied from Chrome "inspect" of table HTML %>%
-                           
-Throughput <- as.numeric(gsub(",","",tsa_raw$Total.Traveler.Throughput))
-Year_Ago_Throughput <- as.numeric(gsub(",","",tsa_raw$Total.Traveler.Throughput..1.Year.Ago...Same.Weekday.))
-Dates <- as.Date(tsa_raw$Date,"%m/%d/%Y")
+Throughput <- as.numeric(gsub(",","",tsa_raw$Total.Traveler.Throughput)) #remove commas from numbers in the table
+Year_Ago_Throughput <- as.numeric(gsub(",","",tsa_raw$Total.Traveler.Throughput..1.Year.Ago...Same.Weekday.)) #remove commas from numbers in the table
+Dates <- as.Date(tsa_raw$Date,"%m/%d/%Y") #format date column as a date variable
+tsa_data <- data.frame(Date = Dates,Throughput,Year_Ago_Throughput) #return cleaned table as a data frame
+}
 
-tsa_data <- data.frame(Date = Dates,Throughput,Year_Ago_Throughput)
+#Get both pages of TSA throughput data and row bind into a single data frame
+tsa_data <- rbind(scrape_table(url_1), scrape_table(url_2))
 
 tsa_data %>%
   ggplot() +
@@ -34,7 +38,7 @@ tsa_data %>%
 ggsave(
   filename = "tsadata.jpg",
   plot = last_plot(),
-  path = "",
+  path = "", #Insert path to which to save the image output file
   scale = 1,
   width = 1920/300,
   height = 1080/300,
