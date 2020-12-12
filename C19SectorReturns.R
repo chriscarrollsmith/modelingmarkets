@@ -80,7 +80,7 @@ sector_df %>%
 ggsave(
   filename = "C19SectorReturns.jpg",
   plot = last_plot(),
-  path = "C:/Users/chris/OneDrive/Pictures/Infographics",
+  path = "", #insert path to which to save the file
   scale = 1,
   width = 1920/144,
   height = 1080/144,
