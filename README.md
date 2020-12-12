@@ -7,6 +7,8 @@ Wall Street Petting Zoo is a weekly investing podcast co-hosted by Robert Coburn
 
 SCRIPTS FOUND IN THIS REPOSITORY
 
+C19SectorReturns.R - Charts stock market returns by equal weight S&P 500 sector since the beginning of the Covid-19 pandemic.
+
 ICUutilization.R - Accesses healthdata.gov API and downloads a JSON file with today's state-by-state ICU bed utilization data. Creates a column chart from this data.
 
 tsadata.R - Scrapes TSA traveler throughput data from tsa.gov and charts 2020 throughput against 2019 throughput to examine the impact of the Covid-19 (coronavirus, SARS-COV-2) pandemic.
