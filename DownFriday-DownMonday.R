@@ -36,7 +36,7 @@ robustness_check <- function(n,day_pairs){
    summarize(n,mean = mean(mom_change))
 }
 #Create sequence of different values of n and run robustness check function
-robustness_results <- map_dfr(.x = seq(from = 3,to = 15,by = 2),.f = robustness_check,day_pairs = day_pairs,n = )
+robustness_results <- map_dfr(.x = seq(from = 3,to = 15,by = 2),.f = robustness_check,day_pairs = day_pairs)
 
 #For each value of n, subtract DF_DM mean momentum change from non-DF_DM
 results_summary <- robustness_results %>%
