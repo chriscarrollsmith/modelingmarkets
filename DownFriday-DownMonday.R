@@ -1,7 +1,7 @@
-#Script to assess statistical significance of "down Friday, down Monday" indicator
+#Script to assess effect size of "down Friday, down Monday" indicator
 
 library(tidyverse)
-# tidy financial analysis 
+# tidy financial analysis
 library(tidyquant)
 # tidy data cleaning functions
 
@@ -24,7 +24,7 @@ day_pairs <- get_prices %>%
 robustness_check <- function(n,day_pairs){
  #Create variables for n-day change preceding and succeeding the day-pair
  day_pairs <- day_pairs %>%
-   mutate(pre = c(rep(NA,times=n),adjusted[-c(1:(n-1),nrow(day_pairs))] - adjusted[-c((nrow(day_pairs)-(n-1)):nrow(day_pairs))]),post = c(adjusted2[-c(1:n)] - adjusted2[-c(1,(nrow(day_pairs)-(n-2)):nrow(day_pairs))],rep(NA,times=n))) %>%
+   mutate(pre = c(rep(NA,times=n),(adjusted[-c(1:(n-1),nrow(day_pairs))] - adjusted[-c((nrow(day_pairs)-(n-1)):nrow(day_pairs))])/adjusted[-c((nrow(day_pairs)-(n-1)):nrow(day_pairs))]),post = c((adjusted2[-c(1:n)] - adjusted2[-c(1,(nrow(day_pairs)-(n-2)):nrow(day_pairs))])/adjusted2[-c(1,(nrow(day_pairs)-(n-2)):nrow(day_pairs))],rep(NA,times=n))) %>%
    filter(!is.na(pre) & !is.na(post))
  #Create variable for pre-post change of direction for all day pairs
  day_pairs <- day_pairs %>%
