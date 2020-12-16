@@ -46,7 +46,7 @@ results_summary <- robustness_results %>%
 }
 
 #Create sequence of different values of y and run sample_size function
-robustness_results <- map_dfr(.x = seq(from = 4,to = 16,by = 4),.f = sample_sizes)
+robustness_results <- map_dfr(.x = seq(from = 5,to = 20,by = 5),.f = sample_sizes)
 
 #Print results table
 robustness_results
