@@ -36,7 +36,7 @@ robustness_check <- function(n,day_pairs){
 }
 
 #Create sequence of different values of n and run robustness check function
-robustness_results <- map_dfr(.x = seq(from = 3,to = 15,by = 2),.f = robustness_check,day_pairs = day_pairs)
+robustness_results <- map_dfr(.x = seq(from = 3,to = 30,by = 5),.f = robustness_check,day_pairs = day_pairs)
 
 #For each value of n, subtract DF_DM mean momentum change from non-DF_DM
 results_summary <- robustness_results %>%
@@ -54,4 +54,4 @@ robustness_results
 #Plot results table
 robustness_results %>%
   ggplot(aes(x = n,y = effect_size)) +
-  geom_point(aes(color=sample_size))
+  geom_line(aes(color=as.factor(sample_size)))
