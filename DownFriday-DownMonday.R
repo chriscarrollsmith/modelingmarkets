@@ -42,7 +42,7 @@ robustness_results <- map_dfr(.x = seq(from = 3,to = 30,by = 5),.f = robustness_
 results_summary <- robustness_results %>%
   mutate(sample_size = y) %>%
   group_by(sample_size,n) %>%
-  summarize(effect_size = mean[2] - mean[1])
+  summarize(effect_size_pct_index = (mean[2] - mean[1]),effect_size_pct_inflection = (mean[2] - mean[1])/mean[1])
 }
 
 #Create sequence of different values of y and run sample_size function
@@ -51,7 +51,12 @@ robustness_results <- map_dfr(.x = seq(from = 5,to = 20,by = 5),.f = sample_size
 #Print results table
 robustness_results
 
-#Plot results table
+#Plot DF+DM "excess inflection" as percent of index price
 robustness_results %>%
-  ggplot(aes(x = n,y = effect_size)) +
+  ggplot(aes(x = n,y = effect_size_pct_index)) +
+  geom_line(aes(color=as.factor(sample_size)))
+
+#Plot DF+DM "excess inflection" as percent of average non-DF+DM inflection
+robustness_results %>%
+  ggplot(aes(x = n,y = effect_size_pct_inflection)) +
   geom_line(aes(color=as.factor(sample_size)))
