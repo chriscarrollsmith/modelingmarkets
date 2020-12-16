@@ -59,4 +59,20 @@ robustness_results %>%
 #Plot DF+DM "excess inflection" as percent of average non-DF+DM inflection
 robustness_results %>%
   ggplot(aes(x = n,y = effect_size_pct_inflection)) +
-  geom_line(aes(color=as.factor(sample_size)))
+  geom_line(aes(color=relevel(as.factor(paste("Last",sample_size,"years",sep=" ")),"Last 5 years"))) +
+  labs(title = "Measuring the inflection effect of the 'Down Friday, Down Monday' stock market signal",
+       x = "Number of days after DF+DM signal",
+       y = "Excess DF+DM inflection as proportion of average inflection at all other day-pairs",
+       color = "Sample size") +
+  theme_classic()
+
+#Export chart as image file
+ggsave(
+  filename = "DFDM.jpg",
+  plot = last_plot(),
+  path = "", #Insert your preferred file path here
+  scale = 1,
+  width = 1920/175,
+  height = 1080/175,
+  units = "in"
+)
