@@ -1,7 +1,10 @@
+#Chart historical volume by security price to identify likely support & resistance levels
+
 # for tidy data analysis
 library(tidyverse)
 library(tidyquant)
 library(mgcv)
+options(scipen = 999)
 
 #choose a ticker
 ticker <- "AAPL"
@@ -27,37 +30,50 @@ for(val in 1:nrow(df)){
     volume_profile$volume[volume_profile$cents %in% day_range] + vol_per_cent
 }
 
+#Use the function that underlies geom_smooth to get y values for smooth model line
+model <- gam(volume ~ s(cents,bs="cs"), data = volume_profile)
+volume_profile <- volume_profile %>% 
+  mutate(smooth = predict(model))
+
+#Use a Monte Carlo simulation to search for local maxima of y within random 
+#ranges for x. Disallow maxima that occur at ends of range.
+maximum <- replicate(100,{
+  x_vals <- sample(volume_profile$cents,size=2,replace=FALSE)
+  max_loc <- volume_profile %>%
+    filter(cents >= min(x_vals) & cents <= max(x_vals)) %>%
+    filter(smooth == max(smooth)) %>%
+    pull(cents)
+  if(max_loc == min(x_vals)|max_loc == max(x_vals)){NA}else{max_loc}
+})
+unique_maxima <- unique(maximum[!is.na(maximum)])
+
 #Convert everything back from integers to dollars and cents
 volume_profile <- volume_profile %>%
   mutate(cents = cents/100,
          volume = round(volume))
-
-#Use the function that underlies geom_smooth and find price at which it hits maximum
+unique_maxima <- unique_maxima/100
 model <- gam(volume ~ s(cents,bs="cs"), data = volume_profile)
 volume_profile <- volume_profile %>% 
   mutate(smooth = predict(model))
-maximum <- volume_profile %>%
-  filter(smooth == max(smooth)) %>%
-  pull(cents)
 
-#Create density plot and overlay smoothed model and vertical line at maximum
+#Create density plot and overlay smoothed model and vertical lines at maxima
 volume_profile %>% 
   ggplot() +
   geom_density(aes(x=cents,y=volume),stat="identity") +
   geom_line(aes(x=cents,y=smooth)) +
-  geom_vline(xintercept = 115,col="Red") +
+  geom_vline(xintercept = unique_maxima,col="Red") +
   labs(title = paste(ticker,"historical volume by split-adjusted stock price"), 
        x = paste(ticker,"split-adjusted stock price"),
        y = "Historical volume located at price",
-       caption = paste("The strongest volume support node is located at $",maximum,sep="")) +
+       caption = paste("Price and volume data courtesy of Yahoo Finance",sep="")) +
   scale_x_continuous(breaks = round(seq(min(volume_profile$cents),max(volume_profile$cents),(max(volume_profile$cents)-min(volume_profile$cents))/10))) +
   theme_bw()
 
 #Export chart as image file
 ggsave(
-  filename = "volumesupport.jpg",
+  filename = "historicalvolume.jpg",
   plot = last_plot(),
-  path = "", #Insert your preferred output file path here
+  path = "", #Insert desired file path here
   scale = 1,
   width = 1920/200,
   height = 1080/200,
