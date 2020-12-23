@@ -45,6 +45,21 @@ volume_profile %>%
   ggplot() +
   geom_density(aes(x=cents,y=volume),stat="identity") +
   geom_line(aes(x=cents,y=smooth)) +
-  geom_vline(xintercept = maximum,col="Red")
+  geom_vline(xintercept = 115,col="Red") +
+  labs(title = paste(ticker,"historical volume by split-adjusted stock price"), 
+       x = paste(ticker,"split-adjusted stock price"),
+       y = "Historical volume located at price",
+       caption = paste("The strongest volume support node is located at $",maximum,sep="")) +
+  scale_x_continuous(breaks = round(seq(min(volume_profile$cents),max(volume_profile$cents),(max(volume_profile$cents)-min(volume_profile$cents))/10))) +
+  theme_bw()
 
-print(paste("The strongest volume support node is located at $",maximum,sep=""))
+#Export chart as image file
+ggsave(
+  filename = "volumesupport.jpg",
+  plot = last_plot(),
+  path = "", #Insert your preferred output file path here
+  scale = 1,
+  width = 1920/200,
+  height = 1080/200,
+  units = "in"
+)
