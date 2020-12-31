@@ -15,4 +15,6 @@ ICUutilization.R - Accesses healthdata.gov API and downloads a JSON file with to
 
 historicalvolume.R - Pulls stock price and historical volume data from Yahoo Finance via the tidyquant library and constructs a profile of historical volume. Inspired by TradingView's "volume profile," this charting technique seeks to identify price levels where a lot of historical volume was located. The theory is that if a price had a lot of historical volume, then there will still be buy and sell orders located there that could make it a critical turning point for the stock's price action. Sample output shows that AAPL has support at $115.
 
+trendlinefinder.R - Scrapes Yahoo! Finance data and charts it using tidyquant functions. Finds and draws all major support and resistance trend lines.
+
 tsadata.R - Scrapes TSA traveler throughput data from tsa.gov and charts 2020 throughput against 2019 throughput to examine the impact of the Covid-19 (coronavirus, SARS-COV-2) pandemic.
