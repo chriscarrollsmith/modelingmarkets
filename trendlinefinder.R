@@ -3,9 +3,11 @@
 library(tidyverse)
 library(tidyquant)
 
+# Here, select your ticker and timeframe
 ticker <- "TSLA"
 start <- Sys.Date() %m-% years(2)
   
+# Get split-adjusted price data from Yahoo! Finance and rond to nearest two digits
 prices <- tq_get(ticker, from = start) %>%
   mutate(open = round(open,digits=2),
          high = round(high,digits=2),
@@ -13,7 +15,7 @@ prices <- tq_get(ticker, from = start) %>%
          close = round(close,digits=2)) %>%
   select(symbol,date,open,high,low,close)
 
-# Filter prices data for lows that are below the 10-day SMA
+# Filter prices data for lows that are below the 10-day simple moving average (SMA)
 lows <- prices %>%
   filter(low < SMA(close),date<max(date))
 # Filter prices data for highs that are above the 10-day SMA
@@ -28,9 +30,10 @@ colnames(all_lowcombos) <- c("X1","X2","Y1","Y2")
 all_highcombos <- bind_cols(as.data.frame(t(combn(highs$date,m=2,simplify=TRUE))),as.data.frame(t(combn(highs$high,m=2,simplify=TRUE))))
 colnames(all_highcombos) <- c("X1","X2","Y1","Y2")
 
-# Generate a trendline for every combination of points
-# to find intercept of a trendline: lm(ys~xs)$coefficients[1]
-# to find slope of a trendline: lm(ys~xs)$coefficients[2]
+# Generate a trendline for every unique combination of two points
+# and return its intercept and slope.
+# Intercept of a trendline: lm(ys~xs)$coefficients[1]
+# Slope of a trendline: lm(ys~xs)$coefficients[2]
 n <- seq(1:nrow(all_lowcombos))
 low_trendfinder <- function(n,all_lowcombos){
   model <- lm(c(all_lowcombos$Y1[n],all_lowcombos$Y2[n])~c(all_lowcombos$X1[n],all_lowcombos$X2[n]))
@@ -47,7 +50,7 @@ high_trendlines <- map_dfr(n,high_trendfinder,all_highcombos = all_highcombos)
 
 # For each low_trendline, check if any low in the prices dataframe falls below the line
 # Keep only trendlines for which this is false
-# Also make sure the trendline wouldn't be below zero for today's date
+# Also make sure the trendline wouldn't be below half the current price for today's date
 low_trendline_test <- function(x,y,prices){
   !any(x*as.numeric(prices$date) + y > prices$low + 0.01) & !(x*as.numeric(Sys.Date())+y < 0.5*prices$close[nrow(prices)])
 }
@@ -56,7 +59,7 @@ none_below <- unlist(none_below)
 low_trendlines <- low_trendlines[none_below,]
 
 # For each high_trendline, check if any high in the prices dataframe falls above the line
-# Also discard any greater than 3x the current price for today's date
+# Also discard any greater than 1.5x the current price for today's date
 high_trendline_test <- function(x,y,prices){
   !any(x*as.numeric(prices$date) + y < prices$high - 0.01) & !(x*as.numeric(Sys.Date())+y > 1.5*prices$close[nrow(prices)])
 }
@@ -79,7 +82,7 @@ prices %>%
 ggsave(
   filename = "trendlines.jpg",
   plot = last_plot(),
-  path = "C:/Users/chris/OneDrive/Pictures/Infographics",
+  path = "", #Insert your preferred file path here
   scale = 1,
   width = 1920/300,
   height = 1080/300,
