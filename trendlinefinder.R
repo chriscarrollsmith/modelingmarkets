@@ -15,12 +15,12 @@ prices <- tq_get(ticker, from = start) %>%
          close = round(close,digits=2)) %>%
   select(symbol,date,open,high,low,close)
 
-# Filter prices data for lows that are below the 10-day simple moving average (SMA)
-lows <- prices %>%
-  filter(low < SMA(close),date<max(date))
-# Filter prices data for highs that are above the 10-day SMA
-highs <- prices %>%
-  filter(high > SMA(close),date<max(date))
+# Filter prices data for lows that fall on the convex hull
+lows <- prices[chull(prices[c("date", "low")]),] %>%
+  filter(date<max(date))
+# Filter prices data for highs that fall on the convex hull
+highs <- prices[chull(prices[c("date", "high")]),] %>%
+  filter(date<max(date))
 
 # Find all unique possible combinations of two lows or two highs
 # (and all unique possible combinations of their associated dates)
@@ -49,7 +49,7 @@ high_trendfinder <- function(n,all_highcombos){
 high_trendlines <- map_dfr(n,high_trendfinder,all_highcombos = all_highcombos)
 
 # For each low_trendline, check if any low in the prices dataframe falls below the line
-# Keep only trendlines for which this is false
+# Keep only trendlines for which this is FALSE
 # Also make sure the trendline wouldn't be below half the current price for today's date
 low_trendline_test <- function(x,y,prices){
   !any(x*as.numeric(prices$date) + y > prices$low + 0.01) & !(x*as.numeric(Sys.Date())+y < 0.5*prices$close[nrow(prices)])
