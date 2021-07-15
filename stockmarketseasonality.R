@@ -28,6 +28,7 @@ monthly_return %>% ggplot(aes(x=month_of_year,y=return,fill=positive)) +
 geom_col() + 
 labs(title = paste(ticker," seasonality since ",month(price_data$date[1]) + 1,"/1/",year(price_data$date[1]),sep = ""),x = "Month",y = "Median return") + 
 scale_y_continuous(labels = scales::percent) +
+scale_fill_manual(values=c("TRUE" = "#00BFC4", "FALSE" = "#f8766d")) +
 theme(legend.position = "none")
 
 ggsave(filename = paste(ticker,"seasonality.jpg",sep=""),
