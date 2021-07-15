@@ -1,7 +1,7 @@
 library(tidyverse)
 library(tidyquant)
 
-ticker <- "IWM"
+ticker <- "RSP"
 start <- as.Date("01-01-1980",format="%m-%d-%Y")
 end <- as.Date("12-31-2020",format="%m-%d-%Y")
 
