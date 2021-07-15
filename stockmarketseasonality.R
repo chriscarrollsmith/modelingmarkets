@@ -9,7 +9,7 @@ price_data <- tq_get(ticker,from = start,to = end)
 
 monthly_return <- price_data %>% 
   mutate(year_month = paste(year(date),month(date))) %>% 
-  mutate(return = c(NA,diff(adjusted))) %>% 
+  mutate(return = c(NA,diff(adjusted))/lag(adjusted)) %>% 
   group_by(year_month) %>% 
   summarize(return = sum(return)) %>% 
   filter(!is.na(return)) %>%
@@ -22,11 +22,13 @@ monthly_return <- price_data %>%
 
 monthly_return$month_of_year <- factor(monthly_return$month_of_year,levels = monthly_return$month_of_year[order(monthly_return$month)])
 
-#monthly_return <- monthly_return %>% mutate(curr_month = (month %in% c(month(Sys.Date()),month(Sys.Date())+1)))
 monthly_return <- monthly_return %>% mutate(positive = return >0 )
 
 monthly_return %>% ggplot(aes(x=month_of_year,y=return,fill=positive)) +
-  geom_col() + labs(title = paste(ticker," seasonality since ",month(price_data$date[1]) + 1,"/1/",year(price_data$date[1]),sep = ""),x = "Month",y = "Median return") + theme(legend.position = "none")
+geom_col() + 
+labs(title = paste(ticker," seasonality since ",month(price_data$date[1]) + 1,"/1/",year(price_data$date[1]),sep = ""),x = "Month",y = "Median return") + 
+scale_y_continuous(labels = scales::percent) +
+theme(legend.position = "none")
 
 ggsave(filename = paste(ticker,"seasonality.jpg",sep=""),
        scale = 1,
