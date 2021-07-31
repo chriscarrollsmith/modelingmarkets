@@ -77,6 +77,6 @@ if(type == "barchart"){
 ggsave(filename = paste(ticker,"seasonality",type,".jpg",sep=""),
        path = "",
        scale = 1,
-       width = 1920/300,
-       height = 1080/300,
+       width = 1920/220,
+       height = 1080/220,
        units = "in")
