@@ -65,12 +65,12 @@ if(type == "barchart"){
   
   daily_return %>% ggplot(aes(x=date,y=return,col=type)) +
     geom_ma(ma_fun = SMA, n = 7,linetype="solid",size=1.5) + 
-    #geom_vline(xintercept = c(as.Date("03/20/2021",format="%m/%d/%Y"),as.Date("06/20/2021",format="%m/%d/%Y"),as.Date("09/20/2021",format="%m/%d/%Y"),as.Date("12/20/2021",format="%m/%d/%Y"))) +
+    geom_vline(xintercept = c(as.Date("03/22/2021",format="%m/%d/%Y"),as.Date("06/22/2021",format="%m/%d/%Y"),as.Date("09/22/2021",format="%m/%d/%Y"),as.Date("12/22/2021",format="%m/%d/%Y"))) +
     #uncomment the previous line and adjust dates to indicate ex-dividend dates as vertical lines
     labs(title = paste(ticker," seasonality since ",month(price_data$date[1]) + 1,"/1/",year(price_data$date[1]),sep = ""),x = "date",y = "Mean/median YTD return") + 
     scale_y_continuous(labels = scales::percent) +
     scale_x_date(labels = scales::date_format("%b"),breaks = "1 month") +
-    labs(caption = "Vertical lines represent SPY dividend dates. Data courtesy of Yahoo! Finance. Copyright Wall Street Petting Zoo, 2021.")
+    labs(caption = paste("Vertical lines represent",ticker,"dividend dates. Data courtesy of Yahoo! Finance. Copyright Wall Street Petting Zoo, 2021."))
   
 }else{print("Invalid chart type")}
 
