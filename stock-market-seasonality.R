@@ -75,7 +75,7 @@ if(type == "barchart"){
 }else{print("Invalid chart type")}
 
 ggsave(filename = paste(ticker,"seasonality",type,".jpg",sep=""),
-       path = "C:/Users/chris/OneDrive/Pictures/Infographics",
+       path = "",
        scale = 1,
        width = 1920/300,
        height = 1080/300,
