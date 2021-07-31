@@ -3,19 +3,20 @@ library(tidyverse)
 library(tidyquant)
 
 #Select the ticker to analyze and the type of chart you want ("barchart" or "linechart")
-ticker <- "RSP"
+ticker <- "XLE"
 type <- "linechart"
 start <- as.Date("01-01-1980",format="%m-%d-%Y")
-end <- as.Date("12-31-2020",format="%m-%d-%Y")
+end <- as.Date(paste("12-31-",year(Sys.Date())-1,sep = ""),format="%m-%d-%Y")
 
 #Get Yahoo Finance price history for the ticker using tidyquant
-price_data <- tq_get(ticker,from = start,to = end)
+price_data <- tq_get(ticker,from = start,to = Sys.Date())
 
 if(type == "barchart"){
 
   #If chart type is barchart, find median return by month, chart it, and save it
   
   monthly_return <- price_data %>%
+    filter(date <= end) %>%
     mutate(year_month = paste(year(date),month(date))) %>%
     mutate(return = c(NA,diff(adjusted))/lag(adjusted)) %>%
     group_by(year_month) %>%
@@ -45,7 +46,10 @@ if(type == "barchart"){
   
   daily_return <- price_data %>% 
     mutate(return = c(NA,diff(adjusted))/lag(adjusted)) %>%
-    filter(!is.na(return)) %>%
+    filter(!is.na(return))
+  
+  avg_daily_return <- daily_return %>%
+    filter(date <= end) %>%
     mutate(year = year(date)) %>%
     group_by(year) %>%
     mutate(ytd_return = cumsum(return)) %>% 
@@ -58,19 +62,35 @@ if(type == "barchart"){
     mutate(month = as.numeric(month),day = as.numeric(day)) %>%
     arrange(month,day)
   
-  daily_return <- daily_return %>%
+  avg_daily_return <- avg_daily_return %>%
     mutate(date = as.Date(paste(month,day,"2021"),"%m %d %Y"))
   
-  daily_return <- daily_return %>% gather("type","return",median_ytd_return,mean_ytd_return)
+  daily_return <- daily_return %>% filter(date > end) %>%
+    mutate(ytd_return = cumsum(return)) %>%
+    select(date,actual_ytd_return = ytd_return)
   
-  daily_return %>% ggplot(aes(x=date,y=return,col=type)) +
+  avg_daily_return <- full_join(avg_daily_return,daily_return) %>%
+    select(-month,-day)
+  
+  avg_daily_return <- bind_rows(avg_daily_return,data.frame(date = end,mean_ytd_return = 0,median_ytd_return = 0,actual_ytd_return = 0)) %>%
+    arrange(date) %>% mutate(actual_ytd_return = c(na.approx(actual_ytd_return,na.rm = FALSE)))
+  
+  avg_daily_return <- avg_daily_return %>% gather("type","return",median_ytd_return,mean_ytd_return,actual_ytd_return)
+  
+  avg_daily_return %>% ggplot(aes(x=date,y=return,col=type)) +
+    geom_line(alpha = 0.5) +
     geom_ma(ma_fun = SMA, n = 7,linetype="solid",size=1.5) + 
-    geom_vline(xintercept = c(as.Date("03/22/2021",format="%m/%d/%Y"),as.Date("06/22/2021",format="%m/%d/%Y"),as.Date("09/22/2021",format="%m/%d/%Y"),as.Date("12/22/2021",format="%m/%d/%Y"))) +
+    #geom_vline(xintercept = c(as.Date("03/22/2021",format="%m/%d/%Y"),as.Date("06/22/2021",format="%m/%d/%Y"),as.Date("09/22/2021",format="%m/%d/%Y"),as.Date("12/22/2021",format="%m/%d/%Y"))) +
     #uncomment the previous line and adjust dates to indicate ex-dividend dates as vertical lines
     labs(title = paste(ticker," seasonality since ",month(price_data$date[1]) + 1,"/1/",year(price_data$date[1]),sep = ""),x = "date",y = "Mean/median YTD return") + 
     scale_y_continuous(labels = scales::percent) +
     scale_x_date(labels = scales::date_format("%b"),breaks = "1 month") +
-    labs(caption = paste("Vertical lines represent",ticker,"dividend dates. Data courtesy of Yahoo! Finance. Copyright Wall Street Petting Zoo, 2021."))
+    labs(caption = paste(
+      #"Vertical lines represent",ticker,"dividend dates.",
+      "Bold lines represent the 7-day simple moving average of YTD return.\n
+      Data courtesy of Yahoo! Finance. Copyright Wall Street Petting Zoo, 2021.",
+      sep=""
+      ))
   
 }else{print("Invalid chart type")}
 
