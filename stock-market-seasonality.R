@@ -3,7 +3,7 @@ library(tidyverse)
 library(tidyquant)
 
 #Select the ticker to analyze and the type of chart you want ("barchart" or "linechart")
-ticker <- "XLE"
+ticker <- "RSP"
 type <- "linechart"
 start <- as.Date("01-01-1980",format="%m-%d-%Y")
 end <- as.Date(paste("12-31-",year(Sys.Date())-1,sep = ""),format="%m-%d-%Y")
@@ -87,6 +87,7 @@ if(type == "barchart"){
     scale_x_date(labels = scales::date_format("%b"),breaks = "1 month") +
     labs(caption = paste(
       #"Vertical lines represent",ticker,"dividend dates.",
+      #uncomment the previous line to indicate ex-dividend dates as vertical lines
       "Bold lines represent the 7-day simple moving average of YTD return.\n
       Data courtesy of Yahoo! Finance. Copyright Wall Street Petting Zoo, 2021.",
       sep=""
@@ -95,7 +96,7 @@ if(type == "barchart"){
 }else{print("Invalid chart type")}
 
 ggsave(filename = paste(ticker,"seasonality",type,".jpg",sep=""),
-       path = "",
+       path = "C:/Users/chris/OneDrive/Pictures/Infographics",
        scale = 1,
        width = 1920/220,
        height = 1080/220,
