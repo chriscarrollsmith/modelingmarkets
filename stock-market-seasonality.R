@@ -79,7 +79,7 @@ if(type == "barchart"){
   
   avg_daily_return %>% ggplot(aes(x=date,y=return,col=type)) +
     geom_line(alpha = 0.5) +
-    geom_ma(ma_fun = SMA, n = 7,linetype="solid",size=1.5) + 
+    geom_ma(ma_fun = SMA, n = 7,linetype="solid",size=1) + 
     #geom_vline(xintercept = c(as.Date("03/22/2021",format="%m/%d/%Y"),as.Date("06/22/2021",format="%m/%d/%Y"),as.Date("09/22/2021",format="%m/%d/%Y"),as.Date("12/22/2021",format="%m/%d/%Y"))) +
     #uncomment the previous line and adjust dates to indicate ex-dividend dates as vertical lines
     labs(title = paste(ticker," seasonality since ",month(price_data$date[1]) + 1,"/1/",year(price_data$date[1]),sep = ""),x = "date",y = "Mean/median YTD return") + 
@@ -90,13 +90,13 @@ if(type == "barchart"){
       #uncomment the previous line to indicate ex-dividend dates as vertical lines
       "Bold lines represent the 7-day simple moving average of YTD return.\n
       Data courtesy of Yahoo! Finance. Copyright Wall Street Petting Zoo, 2021.",
-      sep=""
+      sep=" "
       ))
   
 }else{print("Invalid chart type")}
 
 ggsave(filename = paste(ticker,"seasonality",type,".jpg",sep=""),
-       path = "C:/Users/chris/OneDrive/Pictures/Infographics",
+       path = "",
        scale = 1,
        width = 1920/220,
        height = 1080/220,
