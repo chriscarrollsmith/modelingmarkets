@@ -7,7 +7,7 @@ Wall Street Petting Zoo is a weekly investing podcast co-hosted by Robert Coburn
 
 SCRIPTS FOUND IN THIS REPOSITORY
 
-10yr-yield-forecaster.R - Uses the date and PCE inflation rate to forecast yields on the 10-year US treasury bond, using a multiple regression model.
+10yr-yield-forecaster.R - Uses the date and PCE inflation rate to forecast yields on the 10-year US treasury bond, using a multiple regression model. Writeup on Twitter, here: https://twitter.com/WSPZoo/status/1520251415272194054.
 
 C19SectorReturns.R - Charts stock market returns by equal weight S&P 500 sector since the beginning of the Covid-19 pandemic using data from Yahoo Finance.
 
