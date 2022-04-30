@@ -7,6 +7,8 @@ Wall Street Petting Zoo is a weekly investing podcast co-hosted by Robert Coburn
 
 SCRIPTS FOUND IN THIS REPOSITORY
 
+10yr-yield-forecaster.R - Uses the date and PCE inflation rate to forecast yields on the 10-year US treasury bond, using a multiple regression.
+
 C19SectorReturns.R - Charts stock market returns by equal weight S&P 500 sector since the beginning of the Covid-19 pandemic using data from Yahoo Finance.
 
 DownFriday-DownMonday.R - Tests Jeffrey Hirsch's "Down Friday + Down Monday" indicator to see if DF+DM day pairs are more commonly associated with market inflection points than other day-pairs. Uses split-adjusted $SPY price data from Yahoo Finance and tests for robustness against 24 different model specifications. Effect size is positive in all model specifications. Effect size is larger on shorter time frames (5-10 days) and appears weaker when analysis is extended to 15-20 days. Measured magnitude of excess inflection is <1% of index price in all specifications. "Excess inflection" associated with the DF+DM signal is proportionally largest immediately after the signal appears. 3 days after the signal, magnitude of inflection is 18-43% larger than the magnitude of inflection of the average non-DF+DM day-pair. It hits a minimum 18 days after the signal, when magnitude of inflection is only 0.5-13% larger than the magnitude of inflection of the average non-DF+DM day pair.
