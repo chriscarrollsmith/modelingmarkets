@@ -52,8 +52,7 @@ ggsave(filename = "hy-spread-1-year-return.png",
        scale = 1,
        width = 1920/200,
        height = 1080/200,
-       units = "in",
-       path="C:/Users/chris/OneDrive/Pictures/Infographics")
+       units = "in")
 
 #Forecast current expected 2-yr return based on high-yield spread
 #Plot high-yield spread vs. 2-year return
@@ -76,8 +75,7 @@ ggsave(filename = "hy-spread-2-year-return.png",
        scale = 1,
        width = 1920/200,
        height = 1080/200,
-       units = "in",
-       path="C:/Users/chris/OneDrive/Pictures/Infographics")
+       units = "in")
 
 #calculate percentile of yield spread
 yieldspread <- yieldspread %>%
