@@ -3,7 +3,6 @@ title: "Forecasting 10-year US treasury bond yields from PCE inflation rate"
 author: "Christopher C. Smith"
 date: '2022-06-18'
 output: html_document
-bibliography: bibliography.bib
 ---
 
 ```{r setup, include=FALSE, echo=FALSE, message=FALSE, warning=FALSE}
@@ -238,7 +237,7 @@ joined_df %>%
   labs(x="TTM PCE Inflation Rate",y="Monthly Average 10-Year Yield",title="10-Year Yield by PCE Inflation Rate, Controlling for Changes in Yields over Time",caption="Copyright Wall Street Petting Zoo 2022")
 ```
 
-To be sure, the 10-year yield could go much higher. The dispersion of data on our chart is wide. However, this analysis suggests that the 10-year yield may be fairly priced or even slightly underpriced for the current level of inflation, making this a reasonable time to invest in 10-year bonds.
+To be sure, the 10-year yield could go much higher. The dispersion of data on our chart is wide. However, this analysis suggests that the 10-year bond may be fairly priced or even slightly underpriced for the current level of inflation, making this a reasonable time to invest in 10-year bonds.
 
 ```{r cleanup, include=FALSE, echo=FALSE, message=FALSE, warning=FALSE}
 #Close Selenium driver
