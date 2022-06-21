@@ -2,7 +2,7 @@
 title: "Forecasting 10-year US treasury bond yields from PCE inflation rate"
 author: "Christopher C. Smith"
 date: '2022-06-18'
-output: html_document
+output: pdf_document
 ---
 
 ```{r setup, include=FALSE, echo=FALSE, message=FALSE, warning=FALSE}
@@ -100,7 +100,7 @@ joined_df %>%
   geom_point(data=data.frame(twelve_month_pce = last(joined_df$twelve_month_pce),mean_yield = last(joined_df$mean_yield),date = last(joined_df$date)),color="red") +
   scale_x_continuous(breaks = seq(0,10,by = .5)) + 
   scale_y_continuous(limits=c(0,16),breaks = seq(0,16.25,by = 1.25)) +
-  labs(x="TTM PCE Inflation Rate",y="Monthly Average 10-Year Yield",title="10-Year Yield by PCE Inflation Rate",caption="Copyright Wall Street Petting Zoo 2022")
+  labs(x="TTM PCE Inflation Rate",y="Monthly Average 10-Year Yield",title="10-Year Yield by PCE Inflation Rate")
 ```
 
 ## Controlling for time effects
@@ -114,7 +114,7 @@ joined_df %>%
   ggplot(aes(x=date,y=mean_yield)) +
   geom_point() +
   geom_smooth(method="lm",formula=y~log(x)) +
-  labs(x="Date",y="Monthly Average 10-Year Yield",title="10-Year Yield over Time",caption="Copyright Wall Street Petting Zoo 2022")
+  labs(x="Date",y="Monthly Average 10-Year Yield",title="10-Year Yield over Time")
 ```
 
 One way to check whether the time effect is separate from the inflation rate effect is to stratify by inflation rate, and then plot yield vs. time for each stratum. Removing strata with fewer than 20 data points, we get four plots that all show a decline in yields over time.
@@ -130,7 +130,7 @@ joined_df %>%
   geom_point() +
   geom_smooth(method="lm",formula=y~log(x)) +
   facet_wrap( ~ twelve_month_pce_strat) +
-  labs(x="Date",y="Monthly Average 10-Year Yield",title="10-Year Yield over Time, Stratified by PCE Inflation Rate",caption="Copyright Wall Street Petting Zoo 2022")
+  labs(x="Date",y="Monthly Average 10-Year Yield",title="10-Year Yield over Time, Stratified by PCE Inflation Rate")
 ```
 
 Another way to check for an independent time effect is to subtract our PCE inflation-rate regression model's "predicted" yields from every y-value in our data set. Then we plot the leftover "residual" y-values against the date. Here, again, we find a decline in yields over time.
@@ -143,7 +143,7 @@ joined_df %>%
   ggplot(aes(x=date,y=mean_yield_residual)) +
   geom_point() +
   geom_smooth(method="lm",formula=y~x) +
-  labs(x="Date",y="Residual Monthly Average 10-Year Yield",title="Residual 10-Year Yield over Time after Subtracting PCE Inflation-Rate\nLog Regression Model",caption="Copyright Wall Street Petting Zoo 2022")
+  labs(x="Date",y="Residual Monthly Average 10-Year Yield",title="Residual 10-Year Yield over Time after Subtracting PCE Inflation-Rate\nLog Regression Model")
 
 #Do a multiple linear regression accounting for both PCE inflation and date
 fit <- joined_df %>% lm(mean_yield ~ sequence + log(twelve_month_pce), data = .)
@@ -213,9 +213,9 @@ df %>%
   ggplot(aes(x=twelve_month_pce,y=predicted_yield,col=highlight)) +
   geom_point(size=2,show.legend = FALSE) +
   geom_line(show.legend = FALSE) +
-  geom_text(data=df[df$highlight==TRUE,],aes(x=twelve_month_pce,y=predicted_yield,label=round(predicted_yield,1)),nudge_x=-0.2) +
+  geom_text(data=df[df$highlight==TRUE,],aes(x=twelve_month_pce,y=predicted_yield,label=paste(round(predicted_yield,1),"%",sep=""),nudge_x=-0.4)) +
   scale_x_continuous(breaks=seq(0,10,by=.5)) + 
-  labs(x="TTM PCE Inflation Rate",y="Monthly Average 10-Year Yield",title="Predicted 10-Year Yield by PCE Inflation Rate for the Current Date",caption="Copyright Wall Street Petting Zoo 2022") + 
+  labs(x="TTM PCE Inflation Rate",y="Monthly Average 10-Year Yield",title="Predicted 10-Year Yield by PCE Inflation Rate for the Current Date") + 
   theme(legend.position = "none")
 ```
 
@@ -228,13 +228,13 @@ Subtracting all time effects prior to the current date, we can re-plot our origi
 #Re-plot PCE rate against 10-year yield
 joined_df %>%
   mutate(mean_yield = mean_yield - fit$coefficients["sequence"]*sequence + fit$coefficients["sequence"]*last(sequence)) %>%
-  ggplot(aes(x=twelve_month_pce,y=mean_yield)) +
+  ggplot(aes(x=twelve_month_pce,y=mean_yield,col=sequence)) +
   geom_point() +
   geom_smooth(method = "lm",formula = y~log(x)) +
   geom_point(data=data.frame(twelve_month_pce = last(joined_df$twelve_month_pce),mean_yield = last(joined_df$mean_yield),date = last(joined_df$date)),color="red") +
   scale_x_continuous(breaks = seq(0,10,by = .5)) + 
   scale_y_continuous(limits=c(0,16),breaks = seq(0,16.25,by = 1.25)) +
-  labs(x="TTM PCE Inflation Rate",y="Monthly Average 10-Year Yield",title="10-Year Yield by PCE Inflation Rate, Controlling for Changes in Yields over Time",caption="Copyright Wall Street Petting Zoo 2022")
+  labs(x="TTM PCE Inflation Rate",y="Monthly Average 10-Year Yield",title="10-Year Yield by PCE Inflation Rate, Controlling for Changes in Yields\nover Time")
 ```
 
 To be sure, the 10-year yield could go much higher. The dispersion of data on our chart is wide. However, this analysis suggests that the 10-year bond may be fairly priced or even slightly underpriced for the current level of inflation, making this a reasonable time to invest in 10-year bonds.
