@@ -159,7 +159,7 @@ Running a multiple regression on our data will give us a combined model that inc
 
 ```{r cross-validation, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
 
-#Partition data for five-fold cross-validation
+#Partition data for ten-fold cross-validation
 library(caret)
 set.seed(1)
 test_index <- createFolds(joined_df$mean_yield,k=10)
@@ -170,7 +170,7 @@ RMSE <- function(true_ratings, predicted_ratings){
 }
 
 #Perform five-fold cross-validation and calculate RMSEs
-rmses <- map_dfr(1:5,function(x){
+rmses <- map_dfr(1:10,function(x){
   #Partition data
   train_set <- joined_df[-test_index[[x]],]
   test_set <- joined_df[test_index[[x]],]
@@ -213,7 +213,7 @@ df %>%
   ggplot(aes(x=twelve_month_pce,y=predicted_yield,col=highlight)) +
   geom_point(size=2,show.legend = FALSE) +
   geom_line(show.legend = FALSE) +
-  geom_text(data=df[df$highlight==TRUE,],aes(x=twelve_month_pce,y=predicted_yield,label=paste(round(predicted_yield,1),"%",sep=""),nudge_x=-0.4)) +
+  geom_text(data=df[df$highlight==TRUE,],aes(x=twelve_month_pce,y=predicted_yield,label=paste(round(predicted_yield,1),"%",sep="")),nudge_x=-0.3) +
   scale_x_continuous(breaks=seq(0,10,by=.5)) + 
   labs(x="TTM PCE Inflation Rate",y="Monthly Average 10-Year Yield",title="Predicted 10-Year Yield by PCE Inflation Rate for the Current Date") + 
   theme(legend.position = "none")
