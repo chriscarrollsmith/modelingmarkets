@@ -1,0 +1,463 @@
+---
+title: "Documenting a Correlation Between High-Yield Spreads and Forward Investment Returns"
+author: "Christopher C. Smith"
+date: '2022-06-22'
+output: pdf_document
+---
+
+## Introduction
+
+High-yield spreads, the difference in yield between investment-grade and high-yield bonds, can be interpreted as a measure of credit market stress. In a good economy, default rates are relatively low, and high-yield bonds pay average yields fairly close to their average coupon rates. But in a bad economy, default rates rise—especially for high-yield bonds—and average yields fall somewhat below average coupon rates. Investment grade bonds, in contrast, have less default risk and remain relatively unaffected by economic downturns. Thus, when investors see a bad economy ahead, they discount high-yield bonds relative to investment grade bonds, demanding a higher yield in exchange for more credit risk. 
+
+Notably, high-yield spreads tend to peak around the same time that US stock markets bottom. Might high-yield spread data then contain a tradeable signal for stocks? There's reason to think it might. Whereas stock markets tend to go up over time, high-yield spreads tend to move in a more predictable (and thus easier-to-interpret) range. Conventional stock market wisdom also holds that the bond market is "smarter" than the stock market, so perhaps informational signals from bonds will front-run moves in stocks. In this short paper, my goal is simply to demonstrate and document the correlation between high-yield spreads and forward investment returns for stocks, as well as for investment-grade and high-yield bonds. 
+
+```{r setup, include=FALSE, echo=FALSE, message=FALSE, warning=FALSE}
+#Load libraries
+library(tidyverse)
+library(xlsx)
+library(lubridate)
+library(RSelenium)
+library(tidyquant)
+library(caret)
+
+#Start Selenium driver and navigate to FRED series for high-yield spread
+rD <- rsDriver(browser = "firefox")
+driver <- rD[["client"]]
+driver$navigate("https://fred.stlouisfed.org/series/BAMLH0A0HYM2")
+Sys.sleep(8)
+
+#Find "Max" button on the page and click it
+element <- driver$findElement(using = "xpath",'//*[@id="zoom-all"]')
+element$clickElement()
+Sys.sleep(2)
+
+#Find "Download" button on the page and click it
+element <- driver$findElement(using = "css",'.fg-download-btn-chart-gtm > span:nth-child(1)')
+element$clickElement()
+Sys.sleep(2)
+
+#Find "CSV" button on the page and get the link from it
+element <- driver$findElement(using = "xpath",'//*[@id="download-data-csv"]')
+url <- unlist(element$getElementAttribute('href'))
+
+#Get and clean high-yield spread data
+download.file(url,"highyieldspread.csv")
+yieldspread <- read.csv("highyieldspread.csv")
+unlink("highyieldspread.csv")
+yieldspread <- yieldspread %>%
+  select(date=DATE,spread=BAMLH0A0HYM2) %>%
+  mutate(date=as.Date(date),spread=as.numeric(spread)) %>%
+  filter(!is.na(spread))
+
+#Get historical price data and calculate next period percent returns
+prices <- tq_get(c("VOO","GOVT","AGG","HYG","VWOB"))
+prices <- prices %>%
+  group_by(symbol) %>%
+  mutate(return_6_mo = c(diff(adjusted,lag = round(253*.5)),rep(NA,times=round(253*.5)))/adjusted,
+         return_1_yr = c(diff(adjusted,lag = 253),rep(NA,times=253))/adjusted,
+         return_2_yr = c(diff(adjusted,lag = 253*2),rep(NA,times=253*2))/adjusted,
+         return_3_yr = c(diff(adjusted,lag = 253*3),rep(NA,times=253*3))/adjusted)
+
+#Join returns data with high-yield spread data
+prices <- prices %>%
+  select(symbol,date,return_6_mo,return_1_yr,return_2_yr,return_3_yr)
+yieldspread <- inner_join(yieldspread,prices,by="date") %>%
+  mutate(spread = spread/100)
+yieldspread_full <- yieldspread
+
+#calculate percentile of yield spread
+yieldspread <- yieldspread %>%
+  mutate(percentile = rank(spread)/length(spread))
+```
+
+## Analyzing S&P 500 Forward Returns
+
+We begin by looking at correlation coefficients between high-yield spreads and forward returns over various timeframes.
+
+```{r sp500, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+#Filter data to keep S&P 500 only
+yieldspread <- yieldspread_full %>%
+  filter(symbol == "VOO")
+
+#Calculate correlation coefficient between high-yield spread and next-year return
+data.frame(pearsons_6mo = cor(yieldspread$spread,yieldspread$return_6_mo,use="complete.obs"),
+           pearsons_1yr = cor(yieldspread$spread,yieldspread$return_1_yr,use="complete.obs"),
+           pearsons_2yr = cor(yieldspread$spread,yieldspread$return_2_yr,use="complete.obs"),
+           pearsons_3yr = cor(yieldspread$spread,yieldspread$return_3_yr,use="complete.obs")) %>%
+  knitr::kable()
+```
+
+Examining this data, it appears that high-yield spreads have predictive power for returns over a one-year and two-year timeframe, but that correlations are weaker on shorter and longer timeframes. Thus, we will focus on the one-year and two-year timeframes.
+
+Next, we will plot high-yield spreads against next-one-year and next-two-year returns, with a regression model to show expected return. To choose between linear and log regression models, we perform a ten-fold cross-validation and choose the model that minimizes residual mean-squared error, on average, across both timeframes. In this case, that's the linear regression model:
+
+```{r sp500_1, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+#Partition data for ten-fold cross-validation
+set.seed(1)
+test_index_1 <- createFolds(yieldspread$return_1_yr[!is.na(yieldspread$return_1_yr)],k=10)
+test_index_2 <- createFolds(yieldspread$return_2_yr[!is.na(yieldspread$return_2_yr)],k=10)
+
+#Define function to get residual mean squared error of predictions
+RMSE <- function(true_ratings, predicted_ratings){
+  sqrt(mean((true_ratings - predicted_ratings)^2))
+}
+
+#Perform five-fold cross-validation and calculate RMSEs
+rmses <- map_dfr(1:10,function(x){
+  #Partition data
+  train_set_1 <- yieldspread[-test_index_1[[x]],]
+  train_set_2 <- yieldspread[-test_index_2[[x]],]
+  test_set_1 <- yieldspread[test_index_1[[x]],]
+  test_set_2 <- yieldspread[test_index_2[[x]],]
+  
+  #Do a multiple regression, accounting for both PCE inflation and date
+  lm_fit1 <- train_set_1 %>% lm(formula = return_1_yr ~ spread)
+  lm_fit2 <- train_set_2 %>% lm(formula = return_2_yr ~ spread)
+  log_fit1 <- train_set_1 %>% lm(formula = return_1_yr ~ log(spread))
+  log_fit2 <- train_set_2 %>% lm(formula = return_1_yr ~ log(spread))
+  
+  #Choose the model that minimizes RMSE
+  return(data.frame(Model=c("Linear","Log"),
+                    RMSE = c((RMSE(test_set_1$return_1_yr,predict(lm_fit1,test_set_1)) + RMSE(test_set_2$return_2_yr,predict(lm_fit2,test_set_2)))/2,
+                             RMSE(test_set_1$return_1_yr,predict(log_fit1,test_set_1)) + RMSE(test_set_2$return_2_yr,predict(log_fit2,test_set_2))/2),
+                    Trial = rep(x,times=2)))
+})
+
+#Choose model that minimizes RMSE on average
+rmses %>% group_by(Model) %>% summarize(Mean_RMSE = mean(RMSE)) %>% knitr::kable()
+
+#Model expected returns based on high-yield spread
+model_1yr <- lm(yieldspread,formula = return_1_yr ~ spread)
+model_2yr <- lm(yieldspread,formula = return_2_yr ~ spread)
+```
+
+When we create the plot, we see a nice, clear relationship between the two variables—with higher forward S&P 500 returns when high-yield spreads are high—across both timeframes. The relationship is just as strong on the two-year timeframe as on the one-year timeframe. The current yield spread is shown on the chart as a red dot, with the current expected return shown as a dashed line. Now appears to be a good time to buy the S&P 500, with expected forward two-year return at 36%.
+
+```{r sp500_2, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+#Create tidy data frame for charting
+yieldspread <- yieldspread %>% 
+  select(-symbol,-return_6_mo,-return_3_yr) %>%
+  gather("timeframe","value",return_1_yr,return_2_yr) %>%
+  mutate(forecast = case_when(timeframe == "return_1_yr" ~ predict(object=model_1yr,newdata=.),
+                              TRUE ~ predict(object=model_2yr,newdata=.))) %>%
+  mutate(label = case_when(date == max(date) & timeframe == "return_1_yr" ~ paste(scales::percent(round(forecast,2),accuracy=1),"expected 1-year return\nbased on current spread"),
+                           date == max(date) & timeframe == "return_2_yr" ~ paste(scales::percent(round(forecast,2),accuracy=1),"expected 2-year return\nbased on current spread"),
+                           TRUE ~ NA_character_)) %>%
+  mutate(timeframe = case_when(timeframe == "return_1_yr" ~ "1-year forward return",
+                               timeframe == "return_2_yr" ~ "2-year forward return",
+                               TRUE ~ NA_character_))
+
+#Chart forward returns against high-yield spread
+yieldspread %>%
+  mutate(highlight = !is.na(label)) %>%
+  ggplot(aes(x=spread,y=value)) +
+  geom_point() +
+  geom_line(aes(y=forecast),col="blue",lwd=1) +
+  geom_point(aes(y=forecast,color=highlight,alpha=highlight),size=3) +
+  geom_hline(aes(yintercept=forecast,color=highlight,alpha=highlight),lwd=1,linetype="dashed") +
+  geom_text(aes(x=spread,y=forecast,label=label),nudge_y=-.2,nudge_x=.03,col="red",size=4,fontface = "bold") +
+  facet_wrap(vars(timeframe),ncol=2) +
+  labs(title="S&P500 forward return vs. high-yield spread",
+       x="High-yield spread",
+       y="Forward S&P 500 return",
+       caption="Copyright 2022 Wall Street Petting Zoo\nData courtesy FRED and Yahoo! Finance API") + 
+  scale_x_continuous(limits=c(.03,.11),breaks=seq(.03,.11,by=.01), labels=scales::percent) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_color_manual(values=c("black","red")) +
+  scale_alpha_manual(values=c(0,1)) +
+  theme(legend.position="none")
+```
+
+## Analyzing High-Yield Bond Forward Returns
+
+Since high-yield spreads are literally a measure of excess yield on high-yield bonds, we might expect a strong, positive relationship with forward return on a high-yield bond ETF. Looking at the correlation coefficients, that's indeed what we find. The coefficients are positive and similar to the coefficients for the S&P 500.
+
+```{r hyg, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+#Filter data to keep AGG only
+yieldspread <- yieldspread_full %>%
+  filter(symbol == "HYG")
+
+#Calculate correlation coefficient between high-yield spread and next-year return
+data.frame(pearsons_6mo = cor(yieldspread$spread,yieldspread$return_6_mo,use="complete.obs"),
+           pearsons_1yr = cor(yieldspread$spread,yieldspread$return_1_yr,use="complete.obs"),
+           pearsons_2yr = cor(yieldspread$spread,yieldspread$return_2_yr,use="complete.obs"),
+           pearsons_3yr = cor(yieldspread$spread,yieldspread$return_3_yr,use="complete.obs")) %>%
+  knitr::kable()
+```
+
+We again perform a ten-fold cross-validation to determine the best regression model. As with the S&P 500, a linear model minimizes residual mean-squared error better than a log model.
+
+```{r hyg_1, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+#Partition data for ten-fold cross-validation
+set.seed(1)
+test_index_1 <- createFolds(yieldspread$return_1_yr[!is.na(yieldspread$return_1_yr)],k=10)
+test_index_2 <- createFolds(yieldspread$return_2_yr[!is.na(yieldspread$return_2_yr)],k=10)
+
+#Define function to get residual mean squared error of predictions
+RMSE <- function(true_ratings, predicted_ratings){
+  sqrt(mean((true_ratings - predicted_ratings)^2))
+}
+
+#Perform five-fold cross-validation and calculate RMSEs
+rmses <- map_dfr(1:10,function(x){
+  #Partition data
+  train_set_1 <- yieldspread[-test_index_1[[x]],]
+  train_set_2 <- yieldspread[-test_index_2[[x]],]
+  test_set_1 <- yieldspread[test_index_1[[x]],]
+  test_set_2 <- yieldspread[test_index_2[[x]],]
+  
+  #Do a multiple regression, accounting for both PCE inflation and date
+  lm_fit1 <- train_set_1 %>% lm(formula = return_1_yr ~ spread)
+  lm_fit2 <- train_set_2 %>% lm(formula = return_2_yr ~ spread)
+  log_fit1 <- train_set_1 %>% lm(formula = return_1_yr ~ log(spread))
+  log_fit2 <- train_set_2 %>% lm(formula = return_1_yr ~ log(spread))
+  
+  #Choose the model that minimizes RMSE
+  return(data.frame(Model=c("Linear","Log"),
+                    RMSE = c((RMSE(test_set_1$return_1_yr,predict(lm_fit1,test_set_1)) + RMSE(test_set_2$return_2_yr,predict(lm_fit2,test_set_2)))/2,
+                             RMSE(test_set_1$return_1_yr,predict(log_fit1,test_set_1)) + RMSE(test_set_2$return_2_yr,predict(log_fit2,test_set_2))/2),
+                    Trial = rep(x,times=2)))
+})
+
+#Choose model that minimizes RMSE on average
+rmses %>% group_by(Model) %>% summarize(Mean_RMSE = mean(RMSE)) %>% knitr::kable()
+
+#Model expected returns based on high-yield spread
+model_1yr <- lm(yieldspread,formula = return_1_yr ~ spread)
+model_2yr <- lm(yieldspread,formula = return_2_yr ~ spread)
+```
+
+Plotting actual and modeled returns, we again observe a highly positive and highly significant relationship between high-yield spreads and forward returns. Expected forward returns are lower than for the S&P 500, with current expected one-year return at 7%, and expected two-year return at 11%.
+
+```{r hyg_2, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+#Create tidy data frame for charting
+yieldspread <- yieldspread %>% 
+  select(-symbol,-return_6_mo,-return_3_yr) %>%
+  gather("timeframe","value",return_1_yr,return_2_yr) %>%
+  mutate(forecast = case_when(timeframe == "return_1_yr" ~ predict(object=model_1yr,newdata=.),
+                              TRUE ~ predict(object=model_2yr,newdata=.))) %>%
+  mutate(label = case_when(date == max(date) & timeframe == "return_1_yr" ~ paste(scales::percent(round(forecast,2),accuracy=1),"expected 1-year return\nbased on current spread"),
+                           date == max(date) & timeframe == "return_2_yr" ~ paste(scales::percent(round(forecast,2),accuracy=1),"expected 2-year return\nbased on current spread"),
+                           TRUE ~ NA_character_)) %>%
+  mutate(timeframe = case_when(timeframe == "return_1_yr" ~ "1-year forward return",
+                               timeframe == "return_2_yr" ~ "2-year forward return",
+                               TRUE ~ NA_character_))
+
+#Chart forward returns against high-yield spread
+yieldspread %>%
+  mutate(highlight = !is.na(label)) %>%
+  ggplot(aes(x=spread,y=value)) +
+  geom_point() +
+  geom_line(aes(y=forecast),col="blue",lwd=1) +
+  geom_point(aes(y=forecast,color=highlight,alpha=highlight),size=3) +
+  geom_hline(aes(yintercept=forecast,color=highlight,alpha=highlight),lwd=1,linetype="dashed") +
+  geom_text(aes(x=spread,y=forecast,label=label),nudge_y=-.2,nudge_x=.03,col="red",size=4,fontface = "bold") +
+  facet_wrap(vars(timeframe),ncol=2) +
+  labs(title="\"Buy when high-yield spreads are high\": HYG forward return vs. high-yield spread",
+       x="High-yield spread",
+       y="Forward HYG return",
+       caption="Copyright 2022 Wall Street Petting Zoo\nData courtesy FRED and Yahoo! Finance API") + 
+  scale_x_continuous(limits=c(.03,.11),breaks=seq(.03,.11,by=.01), labels=scales::percent) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_color_manual(values=c("black","red")) +
+  scale_alpha_manual(values=c(0,1)) +
+  theme(legend.position="none")
+```
+
+## Analyzing Investment-Grade Bonds Forward Returns
+
+What about investment-grade bonds? Investment-grade bond yields tend to be higher, on average, when high-yield spreads are higher, so we might expect a positive relationship with forward returns here, as well. In fact, many financial advisors will recommend investment-grade bonds as a "safe-haven" in a bad credit environment, when high-yield spreads are high. But in fact, we find the opposite. The relationship between high-yield spreads and forward returns for US Treasury bonds is robustly negative:
+
+```{r govt, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+#Filter data to keep GOVT only
+yieldspread <- yieldspread_full %>%
+  filter(symbol == "GOVT")
+
+#Calculate correlation coefficient between high-yield spread and next-year return
+data.frame(pearsons_6mo = cor(yieldspread$spread,yieldspread$return_6_mo,use="complete.obs"),
+           pearsons_1yr = cor(yieldspread$spread,yieldspread$return_1_yr,use="complete.obs"),
+           pearsons_2yr = cor(yieldspread$spread,yieldspread$return_2_yr,use="complete.obs"),
+           pearsons_3yr = cor(yieldspread$spread,yieldspread$return_3_yr,use="complete.obs")) %>%
+  knitr::kable()
+```
+
+This suggests that when high-yield spreads are high, the "flight to safety" tends to be overdone and treasury bonds overpriced. 
+
+Here, it is the two-year and three-year timeframes that are most significant, so those are the timeframes we will focus on. (Perhaps investment-grade bonds respond to informational signals more slowly than higher-risk, more actively traded assets.) Performing our ten-fold cross validation, we again confirm that it is the linear model that minimizes residual mean-squared error.
+
+```{r govt_1, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+#Partition data for ten-fold cross-validation
+set.seed(1)
+test_index_2 <- createFolds(yieldspread$return_2_yr[!is.na(yieldspread$return_2_yr)],k=10)
+test_index_3 <- createFolds(yieldspread$return_3_yr[!is.na(yieldspread$return_3_yr)],k=10)
+
+#Define function to get residual mean squared error of predictions
+RMSE <- function(true_ratings, predicted_ratings){
+  sqrt(mean((true_ratings - predicted_ratings)^2))
+}
+
+#Perform five-fold cross-validation and calculate RMSEs
+rmses <- map_dfr(1:10,function(x){
+  #Partition data
+  train_set_2 <- yieldspread[-test_index_2[[x]],]
+  train_set_3 <- yieldspread[-test_index_3[[x]],]
+  test_set_2 <- yieldspread[test_index_2[[x]],]
+  test_set_3 <- yieldspread[test_index_3[[x]],]
+  
+  #Do a multiple regression, accounting for both PCE inflation and date
+  lm_fit2 <- train_set_2 %>% lm(formula = return_2_yr ~ spread)
+  lm_fit3 <- train_set_3 %>% lm(formula = return_3_yr ~ spread)
+  log_fit2 <- train_set_2 %>% lm(formula = return_2_yr ~ log(spread))
+  log_fit3 <- train_set_3 %>% lm(formula = return_3_yr ~ log(spread))
+  
+  #Choose the model that minimizes RMSE
+  return(data.frame(Model=c("Linear","Log"),
+                    RMSE = c((RMSE(test_set_2$return_2_yr,predict(lm_fit2,test_set_2)) + RMSE(test_set_3$return_3_yr,predict(lm_fit3,test_set_3)))/2,
+                             RMSE(test_set_2$return_2_yr,predict(log_fit2,test_set_2)) + RMSE(test_set_3$return_3_yr,predict(log_fit3,test_set_3))/2),
+                    Trial = rep(x,times=2)))
+})
+
+#Choose model that minimizes RMSE on average
+rmses %>% group_by(Model) %>% summarize(Mean_RMSE = mean(RMSE)) %>% knitr::kable()
+
+#Model expected returns based on high-yield spread
+model_2yr <- lm(yieldspread,formula = return_2_yr ~ spread)
+model_3yr <- lm(yieldspread,formula = return_3_yr ~ spread)
+```
+
+Finally, we plot our data. Current expected one-year return on the GOVT ETF (a medium-duration portfolio of US Treasury bonds) is merely 1%, making this probably *not* a good time to buy Treasury bonds. And expected returns will only get worse as high-yield spreads rise.
+
+```{r govt_2, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+#Create tidy data frame for charting
+yieldspread <- yieldspread %>% 
+  select(-symbol,-return_6_mo,-return_1_yr) %>%
+  gather("timeframe","value",return_2_yr,return_3_yr) %>%
+  mutate(forecast = case_when(timeframe == "return_2_yr" ~ predict(object=model_2yr,newdata=.),
+                              TRUE ~ predict(object=model_3yr,newdata=.))) %>%
+  mutate(label = case_when(date == max(date) & timeframe == "return_2_yr" ~ paste(scales::percent(round(forecast,2),accuracy=1),"expected 2-year return\nbased on current spread"),
+                           date == max(date) & timeframe == "return_3_yr" ~ paste(scales::percent(round(forecast,2),accuracy=1),"expected 3-year return\nbased on current spread"),
+                           TRUE ~ NA_character_)) %>%
+  mutate(timeframe = case_when(timeframe == "return_2_yr" ~ "2-year forward return",
+                               timeframe == "return_3_yr" ~ "3-year forward return",
+                               TRUE ~ NA_character_))
+
+#Chart forward returns against high-yield spread
+yieldspread %>%
+  mutate(highlight = !is.na(label)) %>%
+  ggplot(aes(x=spread,y=value)) +
+  geom_point() +
+  geom_line(aes(y=forecast),col="blue",lwd=1) +
+  geom_point(aes(y=forecast,color=highlight,alpha=highlight),size=3) +
+  geom_hline(aes(yintercept=forecast,color=highlight,alpha=highlight),lwd=1,linetype="dashed") +
+  geom_text(aes(x=spread,y=forecast,label=label),nudge_y=-.2,nudge_x=.03,col="red",size=4,fontface = "bold") +
+  facet_wrap(vars(timeframe),ncol=2) +
+  labs(title="\"Sell when high-yield spreads are high\": GOVT forward return vs. high-yield spread",
+       x="High-yield spread",
+       y="Forward GOVT return",
+       caption="Copyright 2022 Wall Street Petting Zoo\nData courtesy FRED and Yahoo! Finance API") + 
+  scale_x_continuous(limits=c(.03,.11),breaks=seq(.03,.11,by=.01), labels=scales::percent) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_color_manual(values=c("black","red")) +
+  scale_alpha_manual(values=c(0,1)) +
+  theme(legend.position="none")
+```
+
+For investment-grade corporate bonds exhibit a similar dynamic. As with Treasury bonds, we find a negative relationship with forward returns, with the most significant signal on the two-year and three-year timeframes.
+
+```{r agg, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+#Filter data to keep AGG only
+yieldspread <- yieldspread_full %>%
+  filter(symbol == "AGG")
+
+#Calculate correlation coefficient between high-yield spread and next-year return
+data.frame(pearsons_6mo = cor(yieldspread$spread,yieldspread$return_6_mo,use="complete.obs"),
+           pearsons_1yr = cor(yieldspread$spread,yieldspread$return_1_yr,use="complete.obs"),
+           pearsons_2yr = cor(yieldspread$spread,yieldspread$return_2_yr,use="complete.obs"),
+           pearsons_3yr = cor(yieldspread$spread,yieldspread$return_3_yr,use="complete.obs")) %>%
+  knitr::kable()
+```
+
+Ten-fold cross-validation again confirms that a linear model best minimizes residual mean-squared error.
+
+```{r agg_1, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+#Partition data for ten-fold cross-validation
+set.seed(1)
+test_index_2 <- createFolds(yieldspread$return_2_yr[!is.na(yieldspread$return_2_yr)],k=10)
+test_index_3 <- createFolds(yieldspread$return_3_yr[!is.na(yieldspread$return_3_yr)],k=10)
+
+#Define function to get residual mean squared error of predictions
+RMSE <- function(true_ratings, predicted_ratings){
+  sqrt(mean((true_ratings - predicted_ratings)^2))
+}
+
+#Perform five-fold cross-validation and calculate RMSEs
+rmses <- map_dfr(1:10,function(x){
+  #Partition data
+  train_set_2 <- yieldspread[-test_index_2[[x]],]
+  train_set_3 <- yieldspread[-test_index_3[[x]],]
+  test_set_2 <- yieldspread[test_index_2[[x]],]
+  test_set_3 <- yieldspread[test_index_3[[x]],]
+  
+  #Do a multiple regression, accounting for both PCE inflation and date
+  lm_fit2 <- train_set_2 %>% lm(formula = return_2_yr ~ spread)
+  lm_fit3 <- train_set_3 %>% lm(formula = return_3_yr ~ spread)
+  log_fit2 <- train_set_2 %>% lm(formula = return_2_yr ~ log(spread))
+  log_fit3 <- train_set_3 %>% lm(formula = return_3_yr ~ log(spread))
+  
+  #Choose the model that minimizes RMSE
+  return(data.frame(Model=c("Linear","Log"),
+                    RMSE = c((RMSE(test_set_2$return_2_yr,predict(lm_fit2,test_set_2)) + RMSE(test_set_3$return_3_yr,predict(lm_fit3,test_set_3)))/2,
+                             RMSE(test_set_2$return_2_yr,predict(log_fit2,test_set_2)) + RMSE(test_set_3$return_3_yr,predict(log_fit3,test_set_3))/2),
+                    Trial = rep(x,times=2)))
+})
+
+#Choose model that minimizes RMSE on average
+rmses %>% group_by(Model) %>% summarize(Mean_RMSE = mean(RMSE)) %>% knitr::kable()
+
+#Model expected returns based on high-yield spread
+model_2yr <- lm(yieldspread,formula = return_2_yr ~ spread)
+model_3yr <- lm(yieldspread,formula = return_3_yr ~ spread)
+```
+
+Plotting our data, we again find a negative relationship with forward returns, although expected returns are higher than for Treasury bonds.
+
+```{r agg_2, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+#Create tidy data frame for charting
+yieldspread <- yieldspread %>% 
+  select(-symbol,-return_6_mo,-return_1_yr) %>%
+  gather("timeframe","value",return_2_yr,return_3_yr) %>%
+  mutate(forecast = case_when(timeframe == "return_2_yr" ~ predict(object=model_2yr,newdata=.),
+                              TRUE ~ predict(object=model_3yr,newdata=.))) %>%
+  mutate(label = case_when(date == max(date) & timeframe == "return_2_yr" ~ paste(scales::percent(round(forecast,2),accuracy=1),"expected 2-year return\nbased on current spread"),
+                           date == max(date) & timeframe == "return_3_yr" ~ paste(scales::percent(round(forecast,2),accuracy=1),"expected 3-year return\nbased on current spread"),
+                           TRUE ~ NA_character_)) %>%
+  mutate(timeframe = case_when(timeframe == "return_2_yr" ~ "2-year forward return",
+                               timeframe == "return_3_yr" ~ "3-year forward return",
+                               TRUE ~ NA_character_))
+
+#Chart forward returns against high-yield spread
+yieldspread %>%
+  mutate(highlight = !is.na(label)) %>%
+  ggplot(aes(x=spread,y=value)) +
+  geom_point() +
+  geom_line(aes(y=forecast),col="blue",lwd=1) +
+  geom_point(aes(y=forecast,color=highlight,alpha=highlight),size=3) +
+  geom_hline(aes(yintercept=forecast,color=highlight,alpha=highlight),lwd=1,linetype="dashed") +
+  geom_text(aes(x=spread,y=forecast,label=label),nudge_y=-.2,nudge_x=.03,col="red",size=4,fontface = "bold") +
+  facet_wrap(vars(timeframe),ncol=2) +
+  labs(title="\"Sell when high-yield spreads are high\": AGG forward return vs. high-yield spread",
+       x="High-yield spread",
+       y="Forward AGG return",
+       caption="Copyright 2022 Wall Street Petting Zoo\nData courtesy FRED and Yahoo! Finance API") + 
+  scale_x_continuous(limits=c(.03,.11),breaks=seq(.03,.11,by=.01), labels=scales::percent) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_color_manual(values=c("black","red")) +
+  scale_alpha_manual(values=c(0,1)) +
+  theme(legend.position="none")
+```
+
+## Conclusion and Directions for Future Research
+
+In conclusion, it makes good sense to rotate out of investment-grade bonds and into higher-risk assets such as stocks and high-yield bonds as high-yield spreads rise. And perhaps also the converse: as high-yield spreads fall, the risk involved in stocks and high-yield bonds may cease to be worth taking relative to the risk of investment-grade bonds. Rotation in and out of different asset classes could be scaled, staged, or triggered when a certain threshold is reached. We might, for instance, use the high-yield spread's percentile as a heuristic for asset allocation. As an example, the current high-yield spread is in the `r last(yieldspread$percentile)*100`th percentile of our historical data. Thus, we might go `r scales::percent(last(yieldspread$percentile))` stocks or high-yield bonds, and `r scales::percent(1-last(yieldspread$percentile))` investment-grade bonds. We could rebalance in accordance with changes in the high-yield spread's percentile rank.
+
+In a future extension of this study, I will look at spreads between investment-grade and high-yield bonds in emerging markets, as well as between US and emerging markets bonds. I will experiment with incorporating information about the base discount rate, perhaps transforming yield spread as a percentage of discount rate, or perhaps rendering the base rate as a color gradient on the chart. I will see if the slope of a moving average of high-yield spreads (i.e. is the spread rising or falling?) affects forward returns. I will map date onto my charts as a color gradient and see if there are time effects I need to control for. I will use machine learning techniques to determine how effective our models might be for forecasting out-of-sample. I will also incorporate information about the variance in the data to calculate Sharpe ratios for comparison across asset classes. And finally, I will propose a specific portfolio rebalancing strategy pegged to the high-yield spread.
