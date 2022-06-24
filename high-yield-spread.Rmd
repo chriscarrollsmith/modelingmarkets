@@ -160,8 +160,8 @@ yieldspread %>%
   labs(title="S&P500 forward return vs. high-yield spread",
        x="High-yield spread",
        y="Forward S&P 500 return",
-       caption="Copyright 2022 Wall Street Petting Zoo\nData courtesy FRED and Yahoo! Finance API") + 
-  scale_x_continuous(limits=c(.03,.11),breaks=seq(.03,.11,by=.01), labels=scales::percent) +
+       caption="Data courtesy FRED and Yahoo! Finance API") + 
+  scale_x_continuous(limits=c(.03,.11),breaks=seq(.03,.11,by=.01), labels=scales::percent_format(accuracy = 1L)) +
   scale_y_continuous(labels = scales::percent) +
   scale_color_manual(values=c("black","red")) +
   scale_alpha_manual(values=c(0,1)) +
@@ -253,11 +253,11 @@ yieldspread %>%
   geom_hline(aes(yintercept=forecast,color=highlight,alpha=highlight),lwd=1,linetype="dashed") +
   geom_text(aes(x=spread,y=forecast,label=label),nudge_y=-.2,nudge_x=.03,col="red",size=4,fontface = "bold") +
   facet_wrap(vars(timeframe),ncol=2) +
-  labs(title="\"Buy when high-yield spreads are high\": HYG forward return vs. high-yield spread",
+  labs(title="HYG forward return vs. high-yield spread",
        x="High-yield spread",
        y="Forward HYG return",
-       caption="Copyright 2022 Wall Street Petting Zoo\nData courtesy FRED and Yahoo! Finance API") + 
-  scale_x_continuous(limits=c(.03,.11),breaks=seq(.03,.11,by=.01), labels=scales::percent) +
+       caption="Data courtesy FRED and Yahoo! Finance API") + 
+  scale_x_continuous(limits=c(.03,.11),breaks=seq(.03,.11,by=.01), labels=scales::percent_format(accuracy = 1L)) +
   scale_y_continuous(labels = scales::percent) +
   scale_color_manual(values=c("black","red")) +
   scale_alpha_manual(values=c(0,1)) +
@@ -351,11 +351,11 @@ yieldspread %>%
   geom_hline(aes(yintercept=forecast,color=highlight,alpha=highlight),lwd=1,linetype="dashed") +
   geom_text(aes(x=spread,y=forecast,label=label),nudge_y=-.2,nudge_x=.03,col="red",size=4,fontface = "bold") +
   facet_wrap(vars(timeframe),ncol=2) +
-  labs(title="\"Sell when high-yield spreads are high\": GOVT forward return vs. high-yield spread",
+  labs(title="GOVT forward return vs. high-yield spread",
        x="High-yield spread",
        y="Forward GOVT return",
-       caption="Copyright 2022 Wall Street Petting Zoo\nData courtesy FRED and Yahoo! Finance API") + 
-  scale_x_continuous(limits=c(.03,.11),breaks=seq(.03,.11,by=.01), labels=scales::percent) +
+       caption="Data courtesy FRED and Yahoo! Finance API") + 
+  scale_x_continuous(limits=c(.03,.11),breaks=seq(.03,.11,by=.01), labels=scales::percent_format(accuracy = 1L)) +
   scale_y_continuous(labels = scales::percent) +
   scale_color_manual(values=c("black","red")) +
   scale_alpha_manual(values=c(0,1)) +
@@ -445,11 +445,11 @@ yieldspread %>%
   geom_hline(aes(yintercept=forecast,color=highlight,alpha=highlight),lwd=1,linetype="dashed") +
   geom_text(aes(x=spread,y=forecast,label=label),nudge_y=-.2,nudge_x=.03,col="red",size=4,fontface = "bold") +
   facet_wrap(vars(timeframe),ncol=2) +
-  labs(title="\"Sell when high-yield spreads are high\": AGG forward return vs. high-yield spread",
+  labs(title="AGG forward return vs. high-yield spread",
        x="High-yield spread",
        y="Forward AGG return",
-       caption="Copyright 2022 Wall Street Petting Zoo\nData courtesy FRED and Yahoo! Finance API") + 
-  scale_x_continuous(limits=c(.03,.11),breaks=seq(.03,.11,by=.01), labels=scales::percent) +
+       caption="Data courtesy FRED and Yahoo! Finance API") + 
+  scale_x_continuous(limits=c(.03,.11),breaks=seq(.03,.11,by=.01), labels=scales::percent_format(accuracy = 1L)) +
   scale_y_continuous(labels = scales::percent) +
   scale_color_manual(values=c("black","red")) +
   scale_alpha_manual(values=c(0,1)) +
@@ -461,3 +461,12 @@ yieldspread %>%
 In conclusion, it makes good sense to rotate out of investment-grade bonds and into higher-risk assets such as stocks and high-yield bonds as high-yield spreads rise. And perhaps also the converse: as high-yield spreads fall, the risk involved in stocks and high-yield bonds may cease to be worth taking relative to the risk of investment-grade bonds. Rotation in and out of different asset classes could be scaled, staged, or triggered when a certain threshold is reached. We might, for instance, use the high-yield spread's percentile as a heuristic for asset allocation. As an example, the current high-yield spread is in the `r last(yieldspread$percentile)*100`th percentile of our historical data. Thus, we might go `r scales::percent(last(yieldspread$percentile))` stocks or high-yield bonds, and `r scales::percent(1-last(yieldspread$percentile))` investment-grade bonds. We could rebalance in accordance with changes in the high-yield spread's percentile rank.
 
 In a future extension of this study, I will look at spreads between investment-grade and high-yield bonds in emerging markets, as well as between US and emerging markets bonds. I will experiment with incorporating information about the base discount rate, perhaps transforming yield spread as a percentage of discount rate, or perhaps rendering the base rate as a color gradient on the chart. I will see if the slope of a moving average of high-yield spreads (i.e. is the spread rising or falling?) affects forward returns. I will map date onto my charts as a color gradient and see if there are time effects I need to control for. I will use machine learning techniques to determine how effective our models might be for forecasting out-of-sample. I will also incorporate information about the variance in the data to calculate Sharpe ratios for comparison across asset classes. And finally, I will propose a specific portfolio rebalancing strategy pegged to the high-yield spread.
+
+```{r cleanup, include=FALSE, echo=FALSE, message=FALSE, warning=FALSE}
+#Close Selenium driver
+driver$close()
+rD[["server"]]$stop()
+rm(driver, rD)
+gc()
+system("taskkill /im java.exe /f", intern=FALSE, ignore.stdout=FALSE)
+```
