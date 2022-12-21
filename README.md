@@ -17,8 +17,6 @@ DownFriday-DownMonday.R - Tests Jeffrey Hirsch's "Down Friday + Down Monday" ind
 
 em-us-bond-spread.R - Script to chart the ratio between the VWOB (emerging markets) and GOVT (United States) sovereign bond ETFs. Since these two ETFs have similar duration, the ratio between them makes a useful proxy for the relative cheapness or expensiveness of US vs. emerging markets sovereign bonds.
 
-ICUutilization.R - Accesses healthdata.gov API and downloads a JSON file with today's state-by-state ICU bed utilization data. Creates a column chart from this data. (This script didn't work last I tried it. Healthdata.gov may have removed support for the API.)
-
 historicalvolume.R - Pulls stock price and historical volume data from Yahoo Finance via the tidyquant library and constructs a profile of historical volume. Inspired by TradingView's "volume profile," this charting technique seeks to identify price levels where a lot of historical volume was located. The theory is that if a price had a lot of historical volume, then there will still be buy and sell orders located there that could make it a critical turning point for the stock's price action.
 
 stockmarketseasonality.R - Script to determine the seasonal pattern of returns for any ticker over the last 20 years (or for the lifetime of the ticker, if shorter than that). Just change the ticker and type variables and execute the script to get the chart you want.
