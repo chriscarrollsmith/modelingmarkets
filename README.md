@@ -19,6 +19,8 @@ em-us-bond-spread.R - Script to chart the ratio between the VWOB (emerging marke
 
 historicalvolume.R - Pulls stock price and historical volume data from Yahoo Finance via the tidyquant library and constructs a profile of historical volume. Inspired by TradingView's "volume profile," this charting technique seeks to identify price levels where a lot of historical volume was located. The theory is that if a price had a lot of historical volume, then there will still be buy and sell orders located there that could make it a critical turning point for the stock's price action.
 
+multi-asset-model.R - Constructs simple forecasting models for several different US and global stock and bond index ETFs. Uses supervised machine learning to select model inputs, and multiple linear regression to forecast returns. Sharpe ratio is calculated based on forecasted returns and observed standard deviation from model when forecasting out of sample on a test set. (Sharpe ratios must be used with caution because error is systematically biased rather than random.)
+
 stockmarketseasonality.R - Script to determine the seasonal pattern of returns for any ticker over the last 20 years (or for the lifetime of the ticker, if shorter than that). Just change the ticker and type variables and execute the script to get the chart you want.
 
 trendlinefinder.R - Scrapes Yahoo! Finance data and charts it using tidyquant functions. Finds and draws all major support and resistance trend lines.
