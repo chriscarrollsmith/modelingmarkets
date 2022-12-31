@@ -1,7 +1,7 @@
 ---
 title: "Forecasting 10-year US Treasury yield and S&P 500 P/E from PCE inflation rate"
 author: "Christopher C. Smith"
-date: '2022-12-19'
+date: '2022-12-31'
 output: pdf_document
 ---
 
@@ -116,7 +116,7 @@ joined_df %>%
   labs(x="Date",y="Residual Monthly Average 10-Year Yield",title="Residual 10-Year Yield over Time after Subtracting PCE Inflation-Rate\nLog Regression Model")
 ```
 
-Running a multiple regression on our data will give us a combined model that incorporates both the PCE inflation rate effect and the time effect. But should we use log regression, linear regression, or some combination of the two? To find out, we use a machine learning method called five-fold cross-validation. This involves partitioning the data ten times, with 80% of the data in a training set, and the other 20% in a testing set. Then we run regression models on the training data and use them to make predictions on the testing data, and we choose the model that, on average, minimizes the residual mean squared error of predictions across all five trials.
+Running a multiple regression on our data will give us a combined model that incorporates both the PCE inflation rate effect and the time effect. But should we use log regression, linear regression, or some combination of the two? To find out, we use a machine learning method called five-fold cross-validation. This involves partitioning the data ten times, with 80% of the data in a training set, and the other 20% in a testing set. Then we run regression models on the training data and use them to make predictions on the testing data, and we choose the model that, on average, minimizes the root mean squared error of predictions across all five trials.
 
 ```{r cross-validation, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
 
@@ -125,7 +125,7 @@ library(caret)
 set.seed(1)
 test_index <- createFolds(joined_df$mean_yield,k=5)
 
-#Define function to get residual mean squared error of predictions
+#Define function to get root mean squared error of predictions
 RMSE <- function(true_ratings, predicted_ratings){
   sqrt(mean((true_ratings - predicted_ratings)^2))
 }
