@@ -1,4 +1,4 @@
-# modelingmarkets
+# Modeling Markets
 Financial and economic analysis and data visualization
 
 By Christopher C. Smith
