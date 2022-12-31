@@ -248,7 +248,7 @@ compare_errors <- function(df = test_set){
 
 #Define function to calculate standard deviations of optimized model
 #(with sds from a naive-average forecast for comparison)
-get_sds <- function(df = test_set){
+get_sds <- function(df = test_set,print=T){
   tmp <- df %>%
     mutate(Timeframe = timeframe) %>%
     group_by(Timeframe) %>%
@@ -262,9 +262,9 @@ get_sds <- function(df = test_set){
     summarize(`Model` = sd(`Model`,na.rm=T),
               `Naive Average` = sd(`Naive Average`,na.rm=T)) %>%
     mutate(Timeframe = "Weighted Model Average")
-  bind_rows(tmp,tmp2) %>%
+  if(print==T){bind_rows(tmp,tmp2) %>%
     kable(caption="Standard Deviation from Forecast") %>%
-    print()
+    print()}
   return(tmp)
 }
 
@@ -955,7 +955,7 @@ chartit(df = test_set,insample=F)
 #See if our model forecast performed better than a naive average
 compare_errors(df = test_set)
 
-#Calculate model standard deviations
+#If sds are higher than when we plotted out of sample, use the higher value
 sds <- get_sds(df=test_set)
 
 #Retrain yield spread model on full data set (without partitioning), chart
@@ -981,6 +981,13 @@ yieldspread <- tidify(yieldspread)
 #Choose focus variable for charting, then create chart
 focus_var <- varlist[2]
 chartit(df = yieldspread,insample=T)
+
+#Calculate model standard deviations
+sds <- sds %>%
+  mutate(comparer = get_sds(df=yieldspread,print=F)$Model) %>%
+  mutate(Model = case_when(Model > comparer~Model,
+                           T~comparer)) %>%
+  select(-comparer)
 
 #Based on forecast returns, standard deviations, and risk-free rates, calculate
 #expected sharpe ratios
@@ -1081,6 +1088,13 @@ yieldspread <- tidify(yieldspread)
 focus_var <- varlist[1]
 chartit(df = yieldspread,insample=T)
 
+#If sds are higher than when we plotted out of sample, use the higher value
+sds <- sds %>%
+  mutate(comparer = get_sds(df=yieldspread,print=F)$Model) %>%
+  mutate(Model = case_when(Model > comparer~Model,
+                           T~comparer)) %>%
+  select(-comparer)
+
 #Based on forecast returns, standard deviations, and risk-free rates, calculate
 #expected sharpe ratios
 sharpes <- bind_rows(sharpes,get_sharpes())
@@ -1179,6 +1193,13 @@ yieldspread <- tidify(yieldspread)
 #Choose focus variable for charting, then create chart
 focus_var <- varlist[1]
 chartit(df = yieldspread,insample=T)
+
+#If sds are higher than when we plotted out of sample, use the higher value
+sds <- sds %>%
+  mutate(comparer = get_sds(df=yieldspread,print=F)$Model) %>%
+  mutate(Model = case_when(Model > comparer~Model,
+                           T~comparer)) %>%
+  select(-comparer)
 
 #Based on forecast returns, standard deviations, and risk-free rates, calculate
 #expected sharpe ratios
@@ -1280,6 +1301,13 @@ yieldspread <- tidify(yieldspread)
 focus_var <- varlist[1]
 chartit(df = yieldspread,insample=T)
 
+#If sds are higher than when we plotted out of sample, use the higher value
+sds <- sds %>%
+  mutate(comparer = get_sds(df=yieldspread,print=F)$Model) %>%
+  mutate(Model = case_when(Model > comparer~Model,
+                           T~comparer)) %>%
+  select(-comparer)
+
 #Based on forecast returns, standard deviations, and risk-free rates, calculate
 #expected sharpe ratios
 sharpes <- bind_rows(sharpes,get_sharpes())
@@ -1377,6 +1405,13 @@ yieldspread <- tidify(yieldspread)
 #Choose focus variable for charting, then create chart
 focus_var <- varlist[1]
 chartit(df = yieldspread,insample=T)
+
+#If sds are higher than when we plotted out of sample, use the higher value
+sds <- sds %>%
+  mutate(comparer = get_sds(df=yieldspread,print=F)$Model) %>%
+  mutate(Model = case_when(Model > comparer~Model,
+                           T~comparer)) %>%
+  select(-comparer)
 
 #Based on forecast returns, standard deviations, and risk-free rates, calculate
 #expected sharpe ratios
@@ -1483,6 +1518,13 @@ yieldspread <- tidify(yieldspread)
 focus_var <- varlist[1]
 chartit(df = yieldspread,insample=T)
 
+#If sds are higher than when we plotted out of sample, use the higher value
+sds <- sds %>%
+  mutate(comparer = get_sds(df=yieldspread,print=F)$Model) %>%
+  mutate(Model = case_when(Model > comparer~Model,
+                           T~comparer)) %>%
+  select(-comparer)
+
 #Based on forecast returns, standard deviations, and risk-free rates, calculate
 #expected sharpe ratios
 sharpes <- bind_rows(sharpes,get_sharpes())
@@ -1582,6 +1624,13 @@ yieldspread <- tidify(yieldspread)
 focus_var <- varlist[1]
 chartit(df = yieldspread,insample=T)
 
+#If sds are higher than when we plotted out of sample, use the higher value
+sds <- sds %>%
+  mutate(comparer = get_sds(df=yieldspread,print=F)$Model) %>%
+  mutate(Model = case_when(Model > comparer~Model,
+                           T~comparer)) %>%
+  select(-comparer)
+
 #Based on forecast returns, standard deviations, and risk-free rates, calculate
 #expected sharpe ratios
 sharpes <- bind_rows(sharpes,get_sharpes())
@@ -1644,21 +1693,14 @@ ggsave(filename = "multi-asset-model.jpg",
 
 
 
-# I should probably be excluding training data that overlaps with test data
-# during cross-validation. I could do this by recalculating the returns for any
-# training set that includes a date less than three years before the first date
-# in the test set.
-
 # Development ideas:
-# Try modeling a China ETF that goes back to 2005: ticker PGJ
-# Try reverse repo stochastic as an indicator of market bottoms?
+# Build a modular log vs. linear tuner and apply to all my asset classes
 # Explore using P/E or earnings yield rather than div yield to predict index returns?
 # (Dividend yield is problematic because it's a poor proxy for shareholder yield)
-# Try optimizing a rebalance model, maybe using decision trees?
-# When calculating sharpe, I may want to take the higher sd of in-sample and out-of-sample
-# Build a modular log vs. linear tuner and apply to all my asset classes
 # FRED no longer provides ISM manufacturing PMI; I should see if I can automate
 # retrieval of this data for testing. (Data through 2015 available here:
 # https://data.nasdaq.com/data/FRED/NAPM-ism-manufacturing-pmi-composite-index)
 # Also try Fed balance sheet.
+# Try reverse repo stochastic as an indicator of market bottoms?
+# Try optimizing a rebalance model, maybe using decision trees?
 # Would be interesting to see how different US sectors react to yields and yield spreads
