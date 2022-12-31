@@ -97,7 +97,8 @@ cross_validator <- function(variables_to_study){
   test_index_2 <- splitTimeSeries(yieldspread$return_2_yr,k=5)
   test_index_3 <- splitTimeSeries(yieldspread$return_3_yr,k=5)
 
-  #Find all unique combinations of the variables we're testing
+  #Find all unique combinations of up to two of the variables we're testing
+  #(For combinations larger than one, use the vector 1:length(varlist) for x.)
   varcombos <- map(1:length(varlist),function(x){
     asplit(combinations(n = length(varlist),r = x,v = varlist,repeats.allowed = F),MARGIN = 1)
   }) %>% unlist(recursive=F)
@@ -115,6 +116,17 @@ cross_validator <- function(variables_to_study){
     test_set_2 <- yieldspread[test_index_2[[x]],]
     test_set_3 <- yieldspread[test_index_3[[x]],]
 
+    #Omit from training set any returns that overlap the first date in test set
+    suppressWarnings(train_set_0$return_6_mo <- case_when(between(test_set_0$date[1] - train_set_0$date,0,252*0.5)~NA_real_,
+                                           T~train_set_0$return_6_mo))
+    suppressWarnings(train_set_1$return_1_yr <- case_when(between(test_set_1$date[1] - train_set_1$date,0,252*1)~NA_real_,
+                                           T~train_set_1$return_1_yr))
+    suppressWarnings(train_set_2$return_2_yr <- case_when(between(test_set_2$date[1] - train_set_2$date,0,252*2)~NA_real_,
+                                           T~train_set_2$return_2_yr))
+    suppressWarnings(train_set_3$return_3_yr <- case_when(between(test_set_3$date[1] - train_set_3$date,0,252*3)~NA_real_,
+                                           T~train_set_3$return_3_yr))
+
+    #Create models on training data, predict on test data, and calculate error
     map_dfr(1:length(varcombos),function(y){
       data.frame(model = paste(varcombos[[y]],collapse="+"),
                  trial = x,
@@ -133,10 +145,10 @@ cross_validator <- function(variables_to_study){
                                       test_set_1$return_1_yr,
                                       test_set_2$return_2_yr,
                                       test_set_3$return_3_yr),
-                                    c(rep(mean(train_set_0$return_6_mo),length(test_set_0$return_6_mo)),
-                                      rep(mean(train_set_1$return_1_yr),length(test_set_1$return_1_yr)),
-                                      rep(mean(train_set_2$return_2_yr),length(test_set_2$return_2_yr)),
-                                      rep(mean(train_set_3$return_3_yr),length(test_set_3$return_3_yr)))
+                                    c(rep(mean(train_set_0$return_6_mo,na.rm=T),length(test_set_0$return_6_mo)),
+                                      rep(mean(train_set_1$return_1_yr,na.rm=T),length(test_set_1$return_1_yr)),
+                                      rep(mean(train_set_2$return_2_yr,na.rm=T),length(test_set_2$return_2_yr)),
+                                      rep(mean(train_set_3$return_3_yr,na.rm=T),length(test_set_3$return_3_yr)))
                                   )))
   })
 }
@@ -202,7 +214,7 @@ chartit <- function(df=test_set,insample=F){
     geom_line(aes(y=adj_forecast),col="blue",lwd=1) +
     geom_point(aes(y=adj_forecast,color=highlight,alpha=highlight),size=3) +
     geom_hline(aes(yintercept=adj_forecast,color=highlight,alpha=highlight),lwd=1,linetype="dashed") +
-    geom_text(aes(y=adj_forecast,label=label),col="red",size=4,fontface = "bold") +
+    geom_text(aes(y=adj_forecast,label=label),col="red",size=4,fontface = "bold",hjust="inward") +
     facet_wrap(vars(timeframe),ncol=2,nrow=2) +
     labs(title=paste0(ticker_to_study," forward annualized rate of return (ARR) vs. ",focus_var),
          subtitle = paste0("Charted against ",
@@ -214,7 +226,6 @@ chartit <- function(df=test_set,insample=F){
          y=paste("Forward",ticker_to_study,"ARR"),
          caption="Copyright 2022 Wall Street Petting Zoo\nData courtesy FRED and Yahoo! Finance API") +
     scale_color_manual(values=c("black","red")) +
-    scale_x_continuous(labels=scales::percent_format(accuracy = 1L)) +
     scale_y_continuous(labels = scales::percent) +
     scale_alpha_manual(values=c(0,1)) +
     theme(legend.position="none")
@@ -392,7 +403,7 @@ rm(euryieldspread)
 #To calculate simple annualized rate of return s from total y-year return r, s=r/y
 #To calculate CAGR c from simple annualized rate of return s, c=(s*y+1)^(1/y)-1
 #Or to get CAGR c from total return r, c=(r+1)^(1/y)-1
-#For now, use simple annualized rate of return return
+#For now, use simple annualized rate of return
 prices <- tq_get(c("VOO","VGK","VIOO","VTWO","GOVT","VCLT","HYG","VWOB","EMHY","IEMG"))
 prices <- prices %>%
   group_by(symbol) %>%
@@ -720,6 +731,64 @@ rm(em_govt_yield)
 
 
 
+# Download Macroeconomic Indicators ---------------------------------------
+
+
+
+#Get FRED US CLI Leading Indicators series
+cli_lead_us <- fredr("USALOLITONOSTSAM")
+cli_lead_us <- cli_lead_us %>%
+  select(date,cli_lead_us=value) %>%
+  mutate(cli_lead_us = cli_lead_us-100) %>%
+  filter(!is.na(cli_lead_us))
+
+#Get FRED equities as percentage of US households' assets data
+us_equities_allocation <- fredr("BOGZ1FL153064486Q")
+us_equities_allocation <- us_equities_allocation %>%
+  filter(date >= as.Date("1951-10-01")) %>% #Remove pre-1951 non-quarterly data
+  select(date,us_equities_allocation=value) %>%
+  mutate(equities_allocation_12m_change = us_equities_allocation - lag(us_equities_allocation,4),
+         equities_allocation_18m_change = us_equities_allocation - lag(us_equities_allocation,6)) %>%
+  filter(!is.na(equities_allocation_12m_change),
+         !is.na(equities_allocation_18m_change)) %>%
+  select(date,equities_allocation_12m_change,equities_allocation_18m_change)
+
+#Get FRED global price of industrial materials data
+industrial_materials <- fredr("PINDUINDEXM")
+industrial_materials <- industrial_materials %>%
+  select(date,industrial_materials=value) %>%
+  filter(!is.na(industrial_materials))
+
+#Get FRED global price of raw materials data
+raw_materials <- fredr("PRAWMINDEXM")
+raw_materials <- raw_materials %>%
+  select(date,raw_materials=value) %>%
+  filter(!is.na(raw_materials))
+
+#Join with yieldspread data frame
+yieldspread_full <- full_join(yieldspread_full,cli_lead_us,by="date")
+yieldspread_full <- full_join(yieldspread_full,us_equities_allocation,by="date")
+yieldspread_full <- full_join(yieldspread_full,industrial_materials,by="date")
+yieldspread_full <- full_join(yieldspread_full,raw_materials,by="date")
+rm(cli_lead_us,us_equities_allocation,industrial_materials,raw_materials)
+
+#Interpolate last non-NA value
+yieldspread_full[yieldspread_full$date >= yieldspread_full$date[which(!is.na(yieldspread_full$cli_lead_us))[1]],] <-
+  yieldspread_full[yieldspread_full$date >= yieldspread_full$date[which(!is.na(yieldspread_full$cli_lead_us))[1]],] %>%
+  mutate(cli_lead_us = na.locf(cli_lead_us))
+yieldspread_full[yieldspread_full$date >= yieldspread_full$date[which(!is.na(yieldspread_full$equities_allocation_12m_change))[1]],] <-
+  yieldspread_full[yieldspread_full$date >= yieldspread_full$date[which(!is.na(yieldspread_full$equities_allocation_12m_change))[1]],] %>%
+  mutate(equities_allocation_12m_change = na.locf(equities_allocation_12m_change),
+         equities_allocation_18m_change = na.locf(equities_allocation_18m_change))
+yieldspread_full[yieldspread_full$date >= yieldspread_full$date[which(!is.na(yieldspread_full$industrial_materials))[1]],] <-
+  yieldspread_full[yieldspread_full$date >= yieldspread_full$date[which(!is.na(yieldspread_full$industrial_materials))[1]],] %>%
+  mutate(industrial_materials = na.locf(industrial_materials))
+yieldspread_full[yieldspread_full$date >= yieldspread_full$date[which(!is.na(yieldspread_full$raw_materials))[1]],] <-
+  yieldspread_full[yieldspread_full$date >= yieldspread_full$date[which(!is.na(yieldspread_full$raw_materials))[1]],] %>%
+  mutate(raw_materials = na.locf(raw_materials))
+
+
+
 # Download Risk-Free Rates ------------------------------------------------
 
 
@@ -827,19 +896,21 @@ yieldspread_full <- left_join(yieldspread_full,vix)
 
 #Define a ticker and a list of variables to study
 ticker_to_study <- "VOO"
-varlist <- c("us_spread","yield7yr","dxy","vix","voo_yield")
+varlist <- c("us_spread","yield7yr","dxy","vix","voo_yield",
+             "cli_lead_us","equities_allocation_12m_change","equities_allocation_18m_change",
+             "industrial_materials","raw_materials")
 
 #Calculate correlation coefficients between variables of interest and next-period return
-cors <- corchecker(df = yieldspread_full,
-                   ticker = ticker_to_study,
+cors <- yieldspread_full %>%
+  corchecker(ticker = ticker_to_study,
                    vars_to_test = varlist)
 
 #Print correlation coefficients in readable format
 cors %>%
   knitr::kable(caption = paste("Correlation coefficients for various variables and next-period",ticker_to_study,"returns"))
 
-#Winnow list of variables to study, keeping only those with average correlation > .3
-varlist <- row.names(cors[cors$avg_of_abs_vals>0.3,])
+#Winnow list of variables to study, keeping only the top 5
+varlist <- row.names(cors[1:5,])
 
 #Delete correlation coefficients table from workspace
 rm(cors)
@@ -878,7 +949,7 @@ model_3yr <- lm(yieldspread,formula = paste0("return_3_yr ~ ",model_type))
 test_set <- tidify(test_set)
 
 #Choose focus variable for charting, then create chart
-focus_var <- varlist[2]
+focus_var <- varlist[1]
 chartit(df = test_set,insample=F)
 
 #See if our model forecast performed better than a naive average
@@ -924,7 +995,9 @@ rm(sds)
 
 #Define a ticker and a list of variables to study
 ticker_to_study <- "GOVT"
-varlist <- c("us_spread","yield7yr","dxy","vix")
+varlist <- c("us_spread","yield7yr","dxy","vix",
+             "cli_lead_us","industrial_materials","raw_materials",
+             "equities_allocation_12m_change","equities_allocation_18m_change")
 
 #Calculate correlation coefficients between variables of interest and next-period return
 cors <- corchecker(df = yieldspread_full,
@@ -935,8 +1008,8 @@ cors <- corchecker(df = yieldspread_full,
 cors %>%
   knitr::kable(caption = paste("Correlation coefficients for various variables and next-period",ticker_to_study,"returns"))
 
-#Winnow list of variables to study, keeping only those with average correlation > .3
-varlist <- row.names(cors[cors$avg_of_abs_vals>0.3,])
+#Winnow list of variables to study, keeping only the top 5
+varlist <- row.names(cors[1:5,])
 
 #Delete correlation coefficients table from workspace
 rm(cors)
@@ -1022,7 +1095,8 @@ rm(sds)
 
 #Define a ticker and a list of variables to study
 ticker_to_study <- "VWOB"
-varlist <- c("em_spread","em_govt_yield","dxy","vix")
+varlist <- c("em_spread","em_govt_yield","dxy",
+             "industrial_materials","raw_materials")
 
 #Calculate correlation coefficients between variables of interest and next-period return
 cors <- corchecker(df = yieldspread_full,
@@ -1034,7 +1108,7 @@ cors %>%
   knitr::kable(caption = paste("Correlation coefficients for various variables and next-period",ticker_to_study,"returns"))
 
 #Winnow list of variables to study, keeping only those with average correlation > .3
-varlist <- row.names(cors[cors$avg_of_abs_vals>0.25,])
+varlist <- row.names(cors[1:5,])
 
 #Delete correlation coefficients table from workspace
 rm(cors)
@@ -1120,7 +1194,9 @@ rm(sds)
 
 #Define a ticker and a list of variables to study
 ticker_to_study <- "VCLT"
-varlist <- c("yield7yr","us_spread","us_ig_yield","dxy","vix")
+varlist <- c("yield7yr","us_spread","us_ig_yield","dxy","vix",
+             "cli_lead_us","raw_materials","industrial_materials",
+             "equities_allocation_12m_change","equities_allocation_18m_change")
 
 #Calculate correlation coefficients between variables of interest and next-period return
 cors <- corchecker(df = yieldspread_full,
@@ -1131,8 +1207,8 @@ cors <- corchecker(df = yieldspread_full,
 cors %>%
   knitr::kable(caption = paste("Correlation coefficients for various variables and next-period",ticker_to_study,"returns"))
 
-#Winnow list of variables to study, keeping only those with average correlation > .3
-varlist <- row.names(cors[cors$avg_of_abs_vals>0.25,])
+#Winnow list of variables to study, keeping only the top 5
+varlist <- row.names(cors[1:5,])
 
 #Delete correlation coefficients table from workspace
 rm(cors)
@@ -1218,7 +1294,7 @@ rm(sds)
 
 #Define a ticker and a list of variables to study
 ticker_to_study <- "EMHY"
-varlist <- c("em_spread","em_hy_yield","em_govt_yield")
+varlist <- c("em_spread","em_hy_yield","em_govt_yield","raw_materials","industrial_materials")
 
 #Calculate correlation coefficients between variables of interest and next-period return
 cors <- corchecker(df = yieldspread_full,
@@ -1316,7 +1392,8 @@ rm(sds)
 
 #Define a ticker and a list of variables to study
 ticker_to_study <- "IEMG"
-varlist <- c("em_spread","iemg_yield","em_govt_yield","em_ig_discount","dxy")
+varlist <- c("em_spread","iemg_yield","em_govt_yield","em_ig_discount","dxy",
+             "raw_materials","industrial_materials")
 
 #Calculate correlation coefficient between variables of interest and next-period return
 #Try out new variable subtracting EM investment-grade yield from US high yield
@@ -1331,8 +1408,8 @@ cors <- yieldspread_full %>%
 cors %>%
   knitr::kable(caption = paste("Correlation coefficients for various variables and next-period",ticker_to_study,"returns"))
 
-#Winnow list of variables to study, keeping only those with average correlation > .3
-varlist <- row.names(cors[cors$avg_of_abs_vals>0.3,])
+#Winnow list of variables to study, keeping only the top 5
+varlist <- row.names(cors[1:5,])
 
 #Delete correlation coefficients table from workspace
 rm(cors)
@@ -1420,7 +1497,8 @@ rm(sds)
 
 #Define a ticker and a list of variables to study
 ticker_to_study <- "VGK"
-varlist <- c("eur_spread","dxy","vgk_yield")
+varlist <- c("eur_spread","dxy","vgk_yield",
+             "cli_lead_us","raw_materials","industrial_materials")
 
 #Calculate correlation coefficients between variables of interest and next-period return
 cors <- corchecker(df = yieldspread_full,
@@ -1432,7 +1510,7 @@ cors %>%
   knitr::kable(caption = paste("Correlation coefficients for various variables and next-period",ticker_to_study,"returns"))
 
 #Winnow list of variables to study, keeping only those with average correlation > .3
-varlist <- row.names(cors[cors$avg_of_abs_vals>0.3,])
+varlist <- row.names(cors[1:5,])
 
 #Delete correlation coefficients table from workspace
 rm(cors)
@@ -1520,16 +1598,17 @@ rm(sds)
 sharpes <- sharpes %>%
   filter(Timeframe == "1-year forward return")
 sharpes %>%
-  mutate(`Asset class` = case_when(Ticker=="EMHY"~"EM HY\nBonds",
-                                   Ticker=="GOVT"~"US Govt\nBonds",
+  mutate(`Asset class` = case_when(Ticker=="EMHY"~"EM HY Bonds",
+                                   Ticker=="GOVT"~"US Govt Bonds",
                                    Ticker=="IEMG"~"EM Stocks",
-                                   Ticker=="VCLT"~"US Corp\nBonds",
+                                   Ticker=="VCLT"~"US Corp Bonds",
                                    Ticker=="VGK"~"EU Stocks",
                                    Ticker=="VOO"~"US Stocks",
-                                   Ticker=="EMHY"~"EM HY\nBonds",
-                                   Ticker=="VWOB"~"EM Govt\nBonds")) %>%
+                                   Ticker=="EMHY"~"EM HY Bonds",
+                                   Ticker=="VWOB"~"EM Govt Bonds")) %>%
+  select(`Asset class`,Ticker,Model,`Expected return`,`Expected standard deviation`,`Expected Sharpe`) %>%
   arrange(desc(`Expected Sharpe`)) %>%
-  kable(caption = "Sharpe ratios ")
+  kable(caption = "Sharpe ratios, 1-year timeframe")
 
 #Plot forecasted one-year returns and standard deviations
 sharpes %>%
@@ -1577,13 +1656,7 @@ ggsave(filename = "multi-asset-model.jpg",
 # Try optimizing a rebalance model, maybe using decision trees?
 # When calculating sharpe, I may want to take the higher sd of in-sample and out-of-sample
 # Build a modular log vs. linear tuner and apply to all my asset classes
-# Try out some of the macroeconomic series from FRED, like CLI:
-# https://fred.stlouisfed.org/series/USALOLITONOSTSAM
 # FRED no longer provides ISM manufacturing PMI; I should see if I can automate
 # retrieval of this data for testing. (Data through 2015 available here:
 # https://data.nasdaq.com/data/FRED/NAPM-ism-manufacturing-pmi-composite-index)
-# Also try Fed balance sheet. Year-over-year change in CRB Raw Materials index
-# is supposed to be good on about a 26-week lag. Not available through FRED, but
-# this may be comparable: https://fred.stlouisfed.org/series/PINDUINDEXM. Or this:
-# https://fred.stlouisfed.org/series/PRAWMINDEXM. Also try household equity
-# allocation: https://fred.stlouisfed.org/series/BOGZ1FL153064486Q.
+# Also try Fed balance sheet.
