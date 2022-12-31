@@ -1650,6 +1650,7 @@ ggsave(filename = "multi-asset-model.jpg",
 # in the test set.
 
 # Development ideas:
+# Try modeling a China ETF that goes back to 2005: ticker PGJ
 # Try reverse repo stochastic as an indicator of market bottoms?
 # Explore using P/E or earnings yield rather than div yield to predict index returns?
 # (Dividend yield is problematic because it's a poor proxy for shareholder yield)
@@ -1660,3 +1661,4 @@ ggsave(filename = "multi-asset-model.jpg",
 # retrieval of this data for testing. (Data through 2015 available here:
 # https://data.nasdaq.com/data/FRED/NAPM-ism-manufacturing-pmi-composite-index)
 # Also try Fed balance sheet.
+# Would be interesting to see how different US sectors react to yields and yield spreads
