@@ -57,7 +57,7 @@ initial_predicted_yield <- predict(fit,newdata=data.frame(twelve_month_pce = las
 
 ## Introduction
 
-Versions of this chart have been making the rounds. I've shared it myself. Plot historical 10-year bond yields (Board of Governors, 2022a) against historical PCE inflation rates (Board of Governors, 2022b), run a simple log regression, and *voila!* today's 10-year yield should be `r paste(round(initial_predicted_yield,1),"%",sep="")`!
+A version of this chart made the rounds earlier this year, as inflation soared. Plot historical 10-year bond yields against historical PCE inflation rates, run a simple log regression, and voila! Bond yields are still way too low, and *voila!* today’s 10-year yield should be `r paste(round(initial_predicted_yield,1),"%",sep="")`!
 
 But this is not quite right.
 
@@ -180,7 +180,15 @@ df %>%
   theme(legend.position = "none") 
 ```
 
-What drives this "date effect" that has brought bond yields down over time? Probably a combination of things, including 1) technological improvements in underwriting and lender risk assessment, 2) deflationary demographic trends that have shrunk the workforce and enlarged the dependent population, and 3) the growth of the national debt as a share of GDP, which siphons away a growing share of the money supply for debt service. A more sophisticated model would attempt to disambiguate these things, but that would take a good deal more data. Unless the US suddenly reverses one of these trends in technology, demography, or debt, it's enough for our purposes to model a "date effect."
+What drives this “time effect” that has brought bond yields down over time? Probably a combination of things, including: 
+
+1. technological improvements in underwriting and lender risk assessment, 
+
+2. deflationary demographic trends that have shrunk the workforce and enlarged the dependent population, and 
+
+3. the growth of the national debt as a share of GDP, which siphons away a growing share of the money supply for debt service. 
+
+A more sophisticated model would attempt to disambiguate these things, but that would take a good deal more data. Unless the US suddenly reverses one of these trends in technology, demography, or debt, it’s enough for our purposes to model a time effect.
 
 ## Implications for Bond Market Valuations
 
