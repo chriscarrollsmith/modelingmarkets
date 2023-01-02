@@ -6,7 +6,7 @@
 library(rvest)
 #tidy charts and tables
 library(tidyverse)
-#tidy financial analysis 
+#tidy financial analysis
 library(tidyquant)
 #tidy data cleaning functions
 library(janitor)
@@ -18,7 +18,7 @@ start_date = as.Date("2020/02/19","%Y/%m/%d")
 url <- "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 tickers <- as.data.frame(url %>%
   read_html() %>% #pull all HTML from the webpage
-  html_nodes(xpath = '//*[@id="constituents"]') %>% 
+  html_nodes(xpath = '//*[@id="constituents"]') %>%
   html_table()) #get table using XPath copied from Chrome "inspect" of table HTML
 
 #create a vector of tickers
@@ -45,7 +45,7 @@ df <- df %>%
   mutate(gics_sector = as.factor(gics_sector))
 
 #add a column to show percent change since period start
-df <- df %>% 
+df <- df %>%
   group_by(symbol) %>%
   mutate(pctchange = close/close[1])
 
@@ -74,7 +74,7 @@ sector_df %>%
   mutate(pctchange = pctchange - 1) %>%
   mutate(gics_sector = factor(gics_sector,levels=refactorer)) %>%
   ggplot(aes(x = date,y = pctchange,color=gics_sector)) +
-  geom_line(lwd=1) + 
+  geom_line(linewidth=1) +
   scale_y_continuous(labels = scales::percent) +
   scale_x_date(date_breaks = "3 months", date_labels = "%b%y") +
   labs(title="S&P 500 sector return (equal weight) during the Covid-19 pandemic",x="Date",y="Percent change",color="Sector") +
