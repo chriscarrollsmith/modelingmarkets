@@ -1652,6 +1652,11 @@ ggsave(filename = "multi-asset-model.jpg",
 # In calculating percent dividend yield, should I be using close or adjusted price?
 
 # Near-term development ideas:
+# Since VCLT has average maturity 10-15 years, try a yield series in that range
+# rather than 7-year yield.
+# Dream up some other new variables to test, in the hope of conquering my last
+# couple of undefeated naive averages.
+# Maybe try a PCE inflation series? A YoY change in yields series?
 # Explore using P/E or earnings yield rather than div yield to predict index returns?
 # (Dividend yield is problematic because it's a poor proxy for shareholder yield)
 # FRED no longer provides ISM manufacturing PMI; I should see if I can automate
