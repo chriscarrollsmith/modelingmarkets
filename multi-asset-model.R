@@ -23,7 +23,7 @@ library(scales)
 library(knitr)
 library(janitor)
 
-# Set FRED API key from .Renviron file
+# Fetch FRED API key from .Renviron file
 # NOTE: The script will only work if you have a valid FRED API key in .Renviron!
 readRenviron("~/.Renviron")
 
@@ -565,40 +565,54 @@ rm(cli_lead_us,us_equities_allocation,industrial_materials,raw_materials)
 
 
 
-#Navigate to 6-month T-Bill yield page
+#Get 6-month T-bill yield from FRED
 yield6mo <- fredr("DGS6MO")
 yield6mo <- yield6mo %>%
   select(date,yield6mo=value) %>%
   mutate(yield6mo=yield6mo/100) %>%
   filter(!is.na(yield6mo))
 
-#Navigate to 1-year Treasury yield page
+#Get 1-year Treasury yield from FRED
 yield1yr <- fredr("DGS1")
 yield1yr <- yield1yr %>%
   select(date,yield1yr=value) %>%
   mutate(yield1yr=yield1yr/100) %>%
   filter(!is.na(yield1yr))
 
-#Navigate to 2-year Treasury yield page
+#Get 2-year Treasury yield from FRED
 yield2yr <- fredr("DGS2")
 yield2yr <- yield2yr %>%
   select(date,yield2yr=value) %>%
   mutate(yield2yr=yield2yr/100) %>%
   filter(!is.na(yield2yr))
 
-#Navigate to 3-year Treasury yield page
+#Get 3-year Treasury yield from FRED
 yield3yr <- fredr("DGS3")
 yield3yr <- yield3yr %>%
   select(date,yield3yr=value) %>%
   mutate(yield3yr=yield3yr/100) %>%
   filter(!is.na(yield3yr))
 
-#Navigate to 7-year Treasury yield page
+#Get 7-year Treasury yield from FRED
 yield7yr <- fredr("DGS7")
 yield7yr <- yield7yr %>%
   select(date,yield7yr=value) %>%
   mutate(yield7yr=yield7yr/100) %>%
   filter(!is.na(yield7yr))
+
+#Get 10-year Treasury yield from FRED
+yield10yr <- fredr("DGS10")
+yield10yr <- yield10yr %>%
+  select(date,yield10yr=value) %>%
+  mutate(yield10yr=yield10yr/100) %>%
+  filter(!is.na(yield10yr))
+
+#Get 10-year Treasury yield from FRED
+yield20yr <- fredr("DGS20")
+yield20yr <- yield20yr %>%
+  select(date,yield20yr=value) %>%
+  mutate(yield20yr=yield20yr/100) %>%
+  filter(!is.na(yield20yr))
 
 #Put risk-free returns into a table
 #For now, use the annualized returns, not the total returns
@@ -609,17 +623,7 @@ risk_free_rate <- data.frame(timeframe = c("6-month forward return",
                              risk_free_return = c(last(yield6mo$yield6mo),
                                                   last(yield1yr$yield1yr),
                                                   last(yield2yr$yield2yr),
-                                                  last(yield3yr$yield3yr))) #%>%
-  # mutate(risk_free_return = c(last(yield6mo$yield6mo)*0.5,
-  #                             last(yield1yr$yield1yr),
-  #                             last(yield2yr$yield2yr)*2,
-  #                             last(yield3yr$yield3yr)*3))
-
-#Convert risk-free rates to compound interest using formula c=(s*y+1)^(1/y)-1
-# risk_free_rate$risk_free_cagr[1] <- (risk_free_rate$risk_free_rate[1]*0.5+1)^(1/0.5)-1
-# risk_free_rate$risk_free_cagr[2] <- (risk_free_rate$risk_free_rate[2]*1+1)^(1/1)-1
-# risk_free_rate$risk_free_cagr[3] <- (risk_free_rate$risk_free_rate[3]*2+1)^(1/2)-1
-# risk_free_rate$risk_free_cagr[4] <- (risk_free_rate$risk_free_rate[4]*3+1)^(1/3)-1
+                                                  last(yield3yr$yield3yr)))
 
 #Join risk-free rates with yieldspread_full
 yieldspread_full <- full_join(yieldspread_full,yield6mo,by="date")
@@ -627,6 +631,8 @@ yieldspread_full <- full_join(yieldspread_full,yield1yr,by="date")
 yieldspread_full <- full_join(yieldspread_full,yield2yr,by="date")
 yieldspread_full <- full_join(yieldspread_full,yield3yr,by="date")
 yieldspread_full <- full_join(yieldspread_full,yield7yr,by="date")
+yieldspread_full <- full_join(yieldspread_full,yield10yr,by="date")
+yieldspread_full <- full_join(yieldspread_full,yield20yr,by="date")
 
 #Remove extra variables
 rm(yield6mo)
@@ -634,6 +640,8 @@ rm(yield1yr)
 rm(yield2yr)
 rm(yield3yr)
 rm(yield7yr)
+rm(yield10yr)
+rm(yield20yr)
 
 #Sort yieldspread_full by date
 yieldspread_full <- yieldspread_full %>%
@@ -673,7 +681,7 @@ rm(dxy,vix)
 #To calculate CAGR c from simple annualized rate of return s, c=(s*y+1)^(1/y)-1
 #Or to get CAGR c from total return r, c=(r+1)^(1/y)-1
 #For now, use simple annualized rate of return
-prices <- tq_get(c("VOO","VGK","VIOO","VTWO","GOVT","VCLT","HYG","VWOB","EMHY","IEMG"))
+prices <- tq_get(c("VOO","VGK","VIOO","VTWO","GOVT","VCLT","HYG","VWOB","EMHY","IEMG","TLT"))
 prices <- prices %>%
   group_by(symbol) %>%
   mutate(return_6_mo = c(diff(adjusted,lag = round(252*.5)),rep(NA,times=round(252*.5)))/adjusted,
@@ -1035,6 +1043,118 @@ rm(sds)
 
 
 
+# Analyze TLT Returns ----------------------------------------------------
+
+
+
+#Define a ticker and a list of variables to study
+ticker_to_study <- "TLT"
+varlist <- c("us_spread","yield20yr","dxy","vix",
+             "cli_lead_us","industrial_materials","raw_materials",
+             "equities_allocation_12m_change","equities_allocation_18m_change")
+
+#Calculate correlation coefficients between variables of interest and next-period return
+cors <- corchecker(df = yieldspread_full,
+                   ticker = ticker_to_study,
+                   vars_to_test = varlist)
+
+#Print correlation coefficients in readable format
+cors %>%
+  knitr::kable(caption = paste("Correlation coefficients for various variables and next-period",ticker_to_study,"returns"))
+
+#Winnow list of variables to study, keeping only the top 5
+varlist <- row.names(cors[1:5,])
+
+#Delete correlation coefficients table from workspace
+rm(cors)
+
+#Filter dataset to keep only the data we're interested in
+yieldspread <- yieldspread_full %>%
+  filter(symbol == ticker_to_study) %>%
+  .[c("date","symbol",
+      "return_6_mo","return_1_yr","return_2_yr","return_3_yr",
+      varlist)]
+
+#Partition time series for training, testing, and validation
+test_set <- yieldspread[yieldspread$date >= max(yieldspread$date) - years(4),]
+yieldspread <- yieldspread[yieldspread$date < max(yieldspread$date) - years(4),]
+
+#Call function to use five-fold cross-validation to compare error rates on linear
+#models that combine the selected variables
+errors <- cross_validator(varlist)
+
+#Choose model that minimizes error on average
+errors <- errors %>%
+  group_by(model) %>%
+  summarize(mean_error = mean(error_measure)) %>%
+  arrange(mean_error)
+errors %>% knitr::kable(caption = paste("Mean",global_optimizer[[2]],"by model"))
+model_type <- errors$model[errors$model != "naive_average"][which.min(errors$mean_error[errors$model != "naive_average"])]
+use_model <- case_when(errors$model[which.min(errors$mean_error)] == "naive_average" ~ F,
+                       T ~ T)
+varlist <- varlist[str_detect(model_type,varlist)]
+
+#Retrain the optimal model on the full training data set
+model_6mo <- lm(yieldspread,formula = paste0("return_6_mo ~ ",model_type))
+model_1yr <- lm(yieldspread,formula = paste0("return_1_yr ~ ",model_type))
+model_2yr <- lm(yieldspread,formula = paste0("return_2_yr ~ ",model_type))
+model_3yr <- lm(yieldspread,formula = paste0("return_3_yr ~ ",model_type))
+
+#Forecast returns on test set and convert to tidy data frame
+test_set <- tidify(test_set)
+
+#Choose focus variable for charting, then create chart
+focus_var <- varlist[1]
+chartit(df = test_set,insample=F)
+
+#See if our model forecast performed better than a naive average
+compare_errors(df = test_set) %>% kable(caption = paste0("Comparing model forecast to naive forecast ",global_optimizer[[2]]))
+use_model <- case_when(compare_errors(df = test_set)[5,2] >= compare_errors(df = test_set)[5,3] &
+                         compare_errors(df = test_set)[2,2] >= compare_errors(df = test_set)[2,3] ~ F,
+                       T ~ use_model)
+
+#Calculate model standard deviations
+sds <- get_sds(df=test_set,use_model=use_model)
+
+#Retrain yield spread model on full data set (without partitioning), chart
+#historical forecast against historical data, and forecast returns and sharpe
+#ratio for the current date
+
+#Filter dataset to keep only the data we're interested in
+yieldspread <- yieldspread_full %>%
+  filter(symbol == ticker_to_study) %>%
+  .[c("date","symbol",
+      "return_6_mo","return_1_yr","return_2_yr","return_3_yr",
+      varlist)]
+
+#Retrain the optimal model on the full training data set
+model_6mo <- lm(yieldspread,formula = paste0("return_6_mo ~ ",model_type))
+model_1yr <- lm(yieldspread,formula = paste0("return_1_yr ~ ",model_type))
+model_2yr <- lm(yieldspread,formula = paste0("return_2_yr ~ ",model_type))
+model_3yr <- lm(yieldspread,formula = paste0("return_3_yr ~ ",model_type))
+
+#Forecast returns on test set and convert to tidy data frame
+yieldspread <- tidify(yieldspread)
+
+#Choose focus variable for charting, then create chart
+focus_var <- varlist[1]
+chartit(df = yieldspread,insample=T)
+
+#If sds are higher than when we plotted out of sample, use the higher value
+sds <- sds %>%
+  mutate(comparer = get_sds(df=yieldspread,print=F,use_model=use_model)$Model) %>%
+  mutate(Model = case_when(Model > comparer~Model,
+                           T~comparer)) %>%
+  select(-comparer)
+
+#Based on forecast returns, standard deviations, and risk-free rates, calculate
+#expected sharpe ratios
+sharpes <- bind_rows(sharpes,get_sharpes())
+sharpes
+rm(sds)
+
+
+
 # Analyze VWOB Returns ----------------------------------------------------
 
 
@@ -1152,7 +1272,7 @@ rm(sds)
 
 #Define a ticker and a list of variables to study
 ticker_to_study <- "VCLT"
-varlist <- c("yield7yr","us_spread","us_ig_yield","dxy","vix",
+varlist <- c("yield10yr","yield20yr","us_spread","us_ig_yield","dxy","vix",
              "cli_lead_us","raw_materials","industrial_materials",
              "equities_allocation_12m_change","equities_allocation_18m_change")
 
@@ -1604,10 +1724,11 @@ rm(sds)
 sharpes <- sharpes %>%
   filter(Timeframe == "1-year forward return")
 sharpes %>%
-  mutate(`Asset class` = case_when(Ticker=="EMHY"~"EM HY Bonds",
-                                   Ticker=="GOVT"~"US Govt Bonds",
+  mutate(`Asset class` = case_when(Ticker=="EMHY"~"Med-Term EM HY Bonds",
+                                   Ticker=="GOVT"~"Med-Term US Govt Bonds",
+                                   Ticker=="TLT"~"Long-Term US Govt Bonds",
                                    Ticker=="IEMG"~"EM Stocks",
-                                   Ticker=="VCLT"~"US Corp Bonds",
+                                   Ticker=="VCLT"~"Long-Term US Corp Bonds",
                                    Ticker=="VGK"~"EU Stocks",
                                    Ticker=="VOO"~"US Stocks",
                                    Ticker=="EMHY"~"EM HY Bonds",
@@ -1618,14 +1739,15 @@ sharpes %>%
 
 #Plot forecasted one-year returns and standard deviations
 sharpes %>%
-  mutate(`Index ETF` = case_when(Ticker=="EMHY"~"EMHY\nEM HY\nBonds",
-                            Ticker=="GOVT"~"GOVT\nUS Govt\nBonds",
+  mutate(`Index ETF` = case_when(Ticker=="EMHY"~"EMHY\nMed-Term\nEM HY\nBonds",
+                            Ticker=="GOVT"~"GOVT\nMed-Term\nUS Govt\nBonds",
+                            Ticker=="TLT"~"TLT\nLong-Term\nUS Govt\nBonds",
                             Ticker=="IEMG"~"IEMG\nEM Stocks",
-                            Ticker=="VCLT"~"VCLT\nUS Corp\nBonds",
+                            Ticker=="VCLT"~"VCLT\nLong-Term\nUS Corp\nBonds",
                             Ticker=="VGK"~"VGK\nEU Stocks",
                             Ticker=="VOO"~"VOO\nUS Stocks",
-                            Ticker=="EMHY"~"EMHY\nEM HY\nBonds",
-                            Ticker=="VWOB"~"VWOB\nEM Govt\nBonds")) %>%
+                            Ticker=="EMHY"~"EMHY\nMed-Term\nEM HY\nBonds",
+                            Ticker=="VWOB"~"VWOB\nMed-Term\nEM Govt\nBonds")) %>%
   mutate(`Index ETF` = fct_reorder(`Index ETF`,`Expected return`,.desc=T)) %>%
   ggplot(aes(x=`Index ETF`,y=`Expected return`)) +
   geom_col(fill="lightblue") +
@@ -1652,11 +1774,9 @@ ggsave(filename = "multi-asset-model.jpg",
 # In calculating percent dividend yield, should I be using close or adjusted price?
 
 # Near-term development ideas:
-# Since VCLT has average maturity 10-15 years, try a yield series in that range
-# rather than 7-year yield.
 # Dream up some other new variables to test, in the hope of conquering my last
-# couple of undefeated naive averages.
-# Maybe try a PCE inflation series? A YoY change in yields series?
+# undefeated naive average (on VGK).
+# Maybe try a PCE inflation series? A YoY change in yields/inflation series?
 # Explore using P/E or earnings yield rather than div yield to predict index returns?
 # (Dividend yield is problematic because it's a poor proxy for shareholder yield)
 # FRED no longer provides ISM manufacturing PMI; I should see if I can automate
