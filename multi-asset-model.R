@@ -33,6 +33,15 @@ readRenviron("~/.Renviron")
 
 
 
+#Define function to get and combine multiple FRED series into a single data frame
+get_freds <- function(symbols,varnames){
+  map2_dfr(symbols,varnames,function(s,v){
+    fredr(s) %>%
+      mutate(variable = v) %>%
+      select(date,value,variable)
+  })
+}
+
 #Define function to split time series into k parts
 splitTimeSeries <- function(object,k){
   not_na <- which(!is.na(object))
@@ -327,348 +336,93 @@ get_sharpes <- function(){
 
 
 
-# Download Yield Spread Data -------------------------------------------------
+# Download FRED data ------------------------------------------------------
 
 
 
-#Get and clean high-yield spread data from FRED API
-yieldspread <- fredr("BAMLH0A0HYM2")
-yieldspread <- yieldspread %>%
-  select(date,spread=value) %>%
-  mutate(spread=spread/100) %>%
-  filter(!is.na(spread))
+#Get a bunch of variables from FRED to test as model inputs
+#Convert percentage values to decimal
+#Get rid of negative values that will screw up log transformation
+yieldspread_full <- get_freds(symbols = c("BAMLH0A0HYM2","BAMLEMHYHYLCRPIUSOAS",
+                                          "BAMLHE00EHYIOAS","BAMLH0A0HYM2EY",
+                                          "BAMLEMHBHYCRPIEY","BAMLC0A0CMEY",
+                                          "BAMLEMIBHGCRPIEY","BAMLEMPBPUBSICRPIEY",
+                                          "USALOLITONOSTSAM","OECDELOLITONOSTSAM",
+                                          "BOGZ1FL153064486Q","PINDUINDEXM",
+                                          "PRAWMINDEXM","DCOILBRENTEU",
+                                          "DEXUSEU","PNGASEUUSDM","BAMLHE00EHYIEY",
+                                          "ECBASSETSW","IRLTLT01EZM156N",
+                                          "DGS6MO","DGS1","DGS2","DGS3",
+                                          "DGS7","DGS10","DGS20",
+                                          "VIXCLS","DTWEXBGS","WALCL",
+                                          "CPHPTT01EZM659N","PCETRIM12M159SFRBDAL",
+                                          "MICH","T10YIEM","PCEPI",
+                                          "CP0000EZ19M086NEST"),
+                              varnames = c("us_spread","em_spread",
+                                           "eur_spread","us_hy_yield",
+                                           "em_hy_yield","us_ig_yield",
+                                           "em_ig_yield","em_govt_yield",
+                                           "cli_lead_us","eur_cli",
+                                           "us_equities_allocation","industrial_materials",
+                                           "raw_materials","brent_crude",
+                                           "usd_eur","nat_gas","eur_hy_yield",
+                                           "ecb_bs","eur_10yr_yield",
+                                           "yield6mo","yield1yr",
+                                           "yield2yr","yield3yr",
+                                           "yield7yr","yield10yr","yield20yr",
+                                           "vix","dxy","fed_bs",
+                                           "eur_cpi_12mo","us_pce_12m",
+                                           "u_mich_inflation","breakeven_10yr",
+                                           "us_pce_3mo","eur_cpi_3mo")) %>%
+  mutate(value = case_when(variable %in% c("us_spread","em_spread",
+                                           "eur_spread","us_hy_yield",
+                                           "em_hy_yield","us_ig_yield",
+                                           "em_ig_yield","em_govt_yield",
+                                           "eur_10yr_yield","yield6mo",
+                                           "yield1yr","yield2yr","yield3yr",
+                                           "yield7yr","yield10yr","yield20yr",
+                                           "eur_cpi_12mo","us_pce_12m",
+                                           "u_mich_inflation","breakeven_10yr")~value/100,
+                           T~value)) %>%
+  spread(key = variable,value=value) %>%
+  mutate(cli_lead_us = (cli_lead_us-min(cli_lead_us,na.rm=T))/(max(cli_lead_us,na.rm=T)-min(cli_lead_us,na.rm=T))+1,
+         eur_cli = (eur_cli-min(eur_cli,na.rm=T))/(max(eur_cli,na.rm=T)-min(eur_cli,na.rm=T))+1,
+         eur_cpi_12mo = (eur_cpi_12mo-min(eur_cpi_12mo,na.rm=T))/(max(eur_cpi_12mo,na.rm=T)-min(eur_cpi_12mo,na.rm=T))+1)
 
-# #calculate percentile of yield spread
-# yieldspread <- yieldspread %>%
-#   mutate(percentile = rank(spread)/length(spread))
-# last(yieldspread$percentile)
-#
-# #Plot today's high-yield spread
-# yieldspread %>%
-#   ggplot(aes(x=date,y=spread)) +
-#   geom_line() +
-#   labs(title="US high-yield spread",
-#        x="Date",
-#        y="Spread",
-#        caption="Copyright 2022 Wall Street Petting Zoo\nData courtesy FRED and Yahoo! Finance API") +
-#   scale_y_continuous(labels=scales::percent_format(accuracy=1L))
+#Create a three-month moving average of month-over-month change variable for PCE price index
+yieldspread_full$us_pce_3mo[!is.na(yieldspread_full$us_pce_3mo)] <- (yieldspread_full$us_pce_3mo[!is.na(yieldspread_full$us_pce_3mo)] -
+  lag(yieldspread_full$us_pce_3mo[!is.na(yieldspread_full$us_pce_3mo)],n=1))/lag(yieldspread_full$us_pce_3mo[!is.na(yieldspread_full$us_pce_3mo)],n=1)
+yieldspread_full$us_pce_3mo[!is.na(yieldspread_full$us_pce_3mo)] <- EMA(yieldspread_full$us_pce_3mo[!is.na(yieldspread_full$us_pce_3mo)],n=3)
 
-#Get FRED series for EM high-yield spread
-emyieldspread <- fredr("BAMLEMHYHYLCRPIUSOAS")
-emyieldspread <- emyieldspread %>%
-  select(date,spread=value) %>%
-  mutate(spread=spread/100) %>%
-  filter(!is.na(spread))
+#Create a three-month moving average of month-over-month change variable for Europe CPI price index
+yieldspread_full$eur_cpi_3mo[!is.na(yieldspread_full$eur_cpi_3mo)] <- (yieldspread_full$eur_cpi_3mo[!is.na(yieldspread_full$eur_cpi_3mo)] -
+                                                                       lag(yieldspread_full$eur_cpi_3mo[!is.na(yieldspread_full$eur_cpi_3mo)],n=1))/lag(yieldspread_full$eur_cpi_3mo[!is.na(yieldspread_full$eur_cpi_3mo)],n=1)
+yieldspread_full$eur_cpi_3mo[!is.na(yieldspread_full$eur_cpi_3mo)] <- EMA(yieldspread_full$eur_cpi_3mo[!is.na(yieldspread_full$eur_cpi_3mo)],n=3)
 
-# #calculate percentile of yield spread
-# emyieldspread <- emyieldspread %>%
-#   mutate(percentile = rank(spread)/length(spread))
-# last(emyieldspread$percentile)
-#
-# #Plot today's high-yield spread
-# emyieldspread %>%
-#   ggplot(aes(x=date,y=spread)) +
-#   geom_line() +
-#   labs(title="EM high-yield spread",
-#        x="Date",
-#        y="Spread",
-#        caption="Copyright 2022 Wall Street Petting Zoo\nData courtesy FRED and Yahoo! Finance API") +
-#   scale_y_continuous(labels=scales::percent_format(accuracy=1L))
-
-#join US and EM high-yield spread data frames
-yieldspread <- yieldspread %>%
-  select(date,
-         us_spread = spread)
-emyieldspread <- emyieldspread %>%
-  select(date,
-         em_spread = spread)
-yieldspread_full <- full_join(yieldspread,emyieldspread,by="date")
-rm(yieldspread)
-rm(emyieldspread)
-
-#Get and clean Europe high-yield spread data from FRED API
-euryieldspread <- fredr("BAMLHE00EHYIOAS")
-euryieldspread <- euryieldspread %>%
-  select(date,spread=value) %>%
-  mutate(spread=spread/100) %>%
-  filter(!is.na(spread))
-
-# #calculate percentile of yield spread
-# euryieldspread <- euryieldspread %>%
-#   mutate(percentile = rank(spread)/length(spread))
-# last(euryieldspread$percentile)
-#
-# #Plot today's high-yield spread
-# euryieldspread %>%
-#   ggplot(aes(x=date,y=spread)) +
-#   geom_line() +
-#   labs(title="Europe high-yield spread",
-#        x="Date",
-#        y="Spread",
-#        caption="Copyright 2022 Wall Street Petting Zoo\nData courtesy FRED and Yahoo! Finance API") +
-#   scale_y_continuous(labels=scales::percent_format(accuracy=1L))
-
-#Join Europe and full yieldspread data frames
-yieldspread_full <- full_join(yieldspread_full,euryieldspread %>% select(date,eur_spread = spread),by="date")
-rm(euryieldspread)
-
-# #See how correlated these variables are (~.94)
-cor(yieldspread_full$us_spread,yieldspread_full$eur_spread,use="complete.obs")
-cor(yieldspread_full$us_spread,yieldspread_full$em_spread,use="complete.obs")
+# See how correlated my yield spread variables are (.93 - .97)
+cor(yieldspread_full[c("us_spread","em_spread","eur_spread")],use="complete.obs")
 
 
 
-# Download Effective HY Yields --------------------------------------------
+
+# Calculate Risk-Free Rates ----------------------------------------------
 
 
 
-#Navigate to effective US HY yield page
-us_hy_yield <- fredr("BAMLH0A0HYM2EY")
-us_hy_yield <- us_hy_yield %>%
-  select(date,us_hy_yield=value) %>%
-  mutate(us_hy_yield=us_hy_yield/100) %>%
-  filter(!is.na(us_hy_yield))
-
-# #calculate percentile of yield
-# us_hy_yield %>%
-#   mutate(percentile = rank(us_hy_yield)/length(us_hy_yield)) %>%
-#   pull(percentile) %>%
-#   last()
-
-#Join with yieldspread data frame
-yieldspread_full <- full_join(yieldspread_full,us_hy_yield,by="date")
-rm(us_hy_yield)
-
-#Navigate to effective EM HY yield page
-em_hy_yield <- fredr("BAMLEMHBHYCRPIEY")
-em_hy_yield <- em_hy_yield %>%
-  select(date,em_hy_yield=value) %>%
-  mutate(em_hy_yield=em_hy_yield/100) %>%
-  filter(!is.na(em_hy_yield))
-
-# #calculate percentile of yield
-# em_hy_yield %>%
-#   mutate(percentile = rank(em_hy_yield)/length(em_hy_yield)) %>%
-#   pull(percentile) %>%
-#   last()
-
-#Join with yieldspread data frame
-yieldspread_full <- full_join(yieldspread_full,em_hy_yield,by="date")
-rm(em_hy_yield)
-
-
-
-# Download Effective IG Yields --------------------------------------------
-
-
-
-#Navigate to effective US IG yield page
-us_ig_yield <- fredr("BAMLC0A0CMEY")
-us_ig_yield <- us_ig_yield %>%
-  select(date,us_ig_yield=value) %>%
-  mutate(us_ig_yield=us_ig_yield/100) %>%
-  filter(!is.na(us_ig_yield))
-
-# #calculate percentile of yield
-# us_ig_yield %>%
-#   mutate(percentile = rank(us_ig_yield)/length(us_ig_yield)) %>%
-#   pull(percentile) %>%
-#   last()
-
-#Join with yieldspread data frame
-yieldspread_full <- full_join(yieldspread_full,us_ig_yield,by="date")
-rm(us_ig_yield)
-
-#Navigate to effective EM IG yield page
-em_ig_yield <- fredr("BAMLEMIBHGCRPIEY")
-em_ig_yield <- em_ig_yield %>%
-  select(date,em_ig_yield=value) %>%
-  mutate(em_ig_yield=em_ig_yield/100) %>%
-  filter(!is.na(em_ig_yield))
-
-# #calculate percentile of yield
-# em_ig_yield %>%
-#   mutate(percentile = rank(em_ig_yield)/length(em_ig_yield)) %>%
-#   pull(percentile) %>%
-#   last()
-
-#Join with yieldspread data frame
-yieldspread_full <- full_join(yieldspread_full,em_ig_yield,by="date")
-rm(em_ig_yield)
-
-#Navigate to effective EM Govt yield page
-em_govt_yield <- fredr("BAMLEMPBPUBSICRPIEY") %>%
-  select(date,em_govt_yield=value) %>%
-  mutate(em_govt_yield=em_govt_yield/100) %>%
-  filter(!is.na(em_govt_yield))
-
-# #calculate percentile of yield
-# em_govt_yield %>%
-#   mutate(percentile = rank(em_govt_yield)/length(em_govt_yield)) %>%
-#   pull(percentile) %>%
-#   last()
-
-#Join with yieldspread data frame
-yieldspread_full <- full_join(yieldspread_full,em_govt_yield,by="date")
-rm(em_govt_yield)
-
-
-
-# Download Macroeconomic Indicators ---------------------------------------
-
-
-
-#Get FRED US CLI Leading Indicators series
-cli_lead_us <- fredr("USALOLITONOSTSAM")
-cli_lead_us <- cli_lead_us %>%
-  select(date,cli_lead_us=value)  %>%
-  filter(!is.na(cli_lead_us)) %>%
-  mutate(cli_lead_us = (cli_lead_us-min(cli_lead_us))/(max(cli_lead_us)-min(cli_lead_us))+1)
-
-#Get FRED equities as percentage of US households' assets data
-#Calculate trailing 12 and 18 month change
-#Make sure all values are positive for log transformation
-us_equities_allocation <- fredr("BOGZ1FL153064486Q")
-us_equities_allocation <- us_equities_allocation %>%
-  filter(date >= as.Date("1951-10-01")) %>% #Remove pre-1951 non-quarterly data
-  select(date,us_equities_allocation=value) %>%
-  mutate(equities_allocation_12m_change = us_equities_allocation - lag(us_equities_allocation,4),
-         equities_allocation_18m_change = us_equities_allocation - lag(us_equities_allocation,6)) %>%
-  filter(!is.na(equities_allocation_12m_change),
-         !is.na(equities_allocation_18m_change)) %>%
-  select(date,equities_allocation_12m_change,equities_allocation_18m_change) %>%
-  mutate(equities_allocation_12m_change = (equities_allocation_12m_change-min(equities_allocation_12m_change))/(max(equities_allocation_12m_change)-min(equities_allocation_12m_change))+1,
-         equities_allocation_18m_change = (equities_allocation_18m_change-min(equities_allocation_18m_change))/(max(equities_allocation_18m_change)-min(equities_allocation_18m_change))+1)
-
-#Get FRED global price of industrial materials data
-industrial_materials <- fredr("PINDUINDEXM")
-industrial_materials <- industrial_materials %>%
-  select(date,industrial_materials=value) %>%
-  filter(!is.na(industrial_materials))
-
-#Get FRED global price of raw materials data
-raw_materials <- fredr("PRAWMINDEXM")
-raw_materials <- raw_materials %>%
-  select(date,raw_materials=value) %>%
-  filter(!is.na(raw_materials))
-
-#Join with yieldspread data frame
-yieldspread_full <- full_join(yieldspread_full,cli_lead_us,by="date")
-yieldspread_full <- full_join(yieldspread_full,us_equities_allocation,by="date")
-yieldspread_full <- full_join(yieldspread_full,industrial_materials,by="date")
-yieldspread_full <- full_join(yieldspread_full,raw_materials,by="date")
-rm(cli_lead_us,us_equities_allocation,industrial_materials,raw_materials)
-
-
-
-# Download Risk-Free Rates ------------------------------------------------
-
-
-
-#Get 6-month T-bill yield from FRED
-yield6mo <- fredr("DGS6MO")
-yield6mo <- yield6mo %>%
-  select(date,yield6mo=value) %>%
-  mutate(yield6mo=yield6mo/100) %>%
-  filter(!is.na(yield6mo))
-
-#Get 1-year Treasury yield from FRED
-yield1yr <- fredr("DGS1")
-yield1yr <- yield1yr %>%
-  select(date,yield1yr=value) %>%
-  mutate(yield1yr=yield1yr/100) %>%
-  filter(!is.na(yield1yr))
-
-#Get 2-year Treasury yield from FRED
-yield2yr <- fredr("DGS2")
-yield2yr <- yield2yr %>%
-  select(date,yield2yr=value) %>%
-  mutate(yield2yr=yield2yr/100) %>%
-  filter(!is.na(yield2yr))
-
-#Get 3-year Treasury yield from FRED
-yield3yr <- fredr("DGS3")
-yield3yr <- yield3yr %>%
-  select(date,yield3yr=value) %>%
-  mutate(yield3yr=yield3yr/100) %>%
-  filter(!is.na(yield3yr))
-
-#Get 7-year Treasury yield from FRED
-yield7yr <- fredr("DGS7")
-yield7yr <- yield7yr %>%
-  select(date,yield7yr=value) %>%
-  mutate(yield7yr=yield7yr/100) %>%
-  filter(!is.na(yield7yr))
-
-#Get 10-year Treasury yield from FRED
-yield10yr <- fredr("DGS10")
-yield10yr <- yield10yr %>%
-  select(date,yield10yr=value) %>%
-  mutate(yield10yr=yield10yr/100) %>%
-  filter(!is.na(yield10yr))
-
-#Get 10-year Treasury yield from FRED
-yield20yr <- fredr("DGS20")
-yield20yr <- yield20yr %>%
-  select(date,yield20yr=value) %>%
-  mutate(yield20yr=yield20yr/100) %>%
-  filter(!is.na(yield20yr))
+#Make sure yieldspread_full is sorted by date
+yieldspread_full <- yieldspread_full %>%
+  arrange(date)
 
 #Put risk-free returns into a table
-#For now, use the annualized returns, not the total returns
+#Use annualized returns, not total returns, for comparability
 risk_free_rate <- data.frame(timeframe = c("6-month forward return",
                                            "1-year forward return",
                                            "2-year forward return",
                                            "3-year forward return"),
-                             risk_free_return = c(last(yield6mo$yield6mo),
-                                                  last(yield1yr$yield1yr),
-                                                  last(yield2yr$yield2yr),
-                                                  last(yield3yr$yield3yr)))
-
-#Join risk-free rates with yieldspread_full
-yieldspread_full <- full_join(yieldspread_full,yield6mo,by="date")
-yieldspread_full <- full_join(yieldspread_full,yield1yr,by="date")
-yieldspread_full <- full_join(yieldspread_full,yield2yr,by="date")
-yieldspread_full <- full_join(yieldspread_full,yield3yr,by="date")
-yieldspread_full <- full_join(yieldspread_full,yield7yr,by="date")
-yieldspread_full <- full_join(yieldspread_full,yield10yr,by="date")
-yieldspread_full <- full_join(yieldspread_full,yield20yr,by="date")
-
-#Remove extra variables
-rm(yield6mo)
-rm(yield1yr)
-rm(yield2yr)
-rm(yield3yr)
-rm(yield7yr)
-rm(yield10yr)
-rm(yield20yr)
-
-#Sort yieldspread_full by date
-yieldspread_full <- yieldspread_full %>%
-  arrange(date)
-
-
-
-# Download VIX and DXY ----------------------------------------------------
-
-
-
-#Navigate to VIX page
-vix <- fredr("VIXCLS")
-vix <- vix %>%
-  select(date,vix=value) %>%
-  filter(!is.na(vix))
-
-#Navigate to DXY page
-dxy <- fredr("DTWEXBGS")
-dxy <- dxy %>%
-  select(date,dxy=value) %>%
-  filter(!is.na(dxy))
-
-#Join with yieldspread dataframe
-yieldspread_full <- full_join(yieldspread_full,dxy,by="date")
-yieldspread_full <- full_join(yieldspread_full,vix,by="date")
-rm(dxy,vix)
+                             risk_free_return = c(last(yieldspread_full$yield6mo),
+                                                  last(yieldspread_full$yield1yr),
+                                                  last(yieldspread_full$yield2yr),
+                                                  last(yieldspread_full$yield3yr)))
 
 
 
@@ -699,7 +453,7 @@ prices <- prices %>%
 
 #Join return data with high-yield spread data
 prices <- prices %>%
-  select(symbol,adjusted,date,return_6_mo,return_1_yr,return_2_yr,return_3_yr)
+  select(symbol,close,adjusted,date,return_6_mo,return_1_yr,return_2_yr,return_3_yr)
 yieldspread_full <- full_join(yieldspread_full,prices,by="date")
 rm(prices)
 
@@ -711,6 +465,12 @@ rm(prices)
 
 #Get dividend history for IEMG, VOO, VTWO, VIOO, and VGK from Yahoo! Finance
 divs <- tq_get(c("VOO","IEMG","VIOO","VTWO","VGK"),get="dividends")
+
+#Since Yahoo! Finance data isn't split-adjusted but the close price data is, I
+#need to split-adjust pre-April 20, 2021 dividends by multiplying by 4
+divs <- divs %>%
+  mutate(value = case_when(symbol == "VTWO" & date < as.Date("2021-04-20") ~ value*4,
+                           T ~ value))
 
 #Clean up the data and divide payouts by number of days since last payout, then
 #annualize by multiplying by 365
@@ -795,54 +555,138 @@ rm(iemg_div,vgk_div,voo_div,vioo_div,vtwo_div)
 
 
 
-#Arrange dataset by date
+#Remove all data prior to 2010 (because we only have returns from 2013 on)
 yieldspread_full <- yieldspread_full %>%
+  filter(!date < as.Date("2010-01-01"))
+
+#Create a data frame containing every date from 2010 till the present
+dates <- as_tibble(data.table::CJ(date = seq.Date(as.Date("2010-01-01"),Sys.Date(),by="days"),
+                                  symbol=c("VOO","VGK","VIOO","VTWO","GOVT","VCLT","HYG","VWOB","EMHY","IEMG","TLT")))
+
+#Join dates dataframe with yieldspread_full, and arrange in ascending order by date
+yieldspread_full <- yieldspread_full %>%
+  full_join(dates,by=c("date","symbol")) %>%
+  filter(!is.na(symbol)) %>%
   arrange(date)
 
-#Interpolate last non-NA value for various variables
+#Interpolate last non-NA value for model inputs (but *not* for returns)
+#(Why am I ending up with missing values for some of these?)
 yieldspread_full <- yieldspread_full %>%
-  fill(us_spread,em_spread,eur_spread,cli_lead_us,equities_allocation_12m_change,
-       equities_allocation_18m_change,industrial_materials,raw_materials,yield6mo,
-       yield1yr,yield2yr,yield3yr,yield7yr,vix,dxy)
-
-#Interpolate last non-NA value for dividend yield variables
-yieldspread_full <- yieldspread_full %>%
+  fill(us_spread,em_spread,eur_spread,cli_lead_us,us_equities_allocation,
+       industrial_materials,raw_materials,yield6mo,em_govt_yield,em_hy_yield,
+       yield1yr,yield2yr,yield3yr,yield7yr,vix,dxy,em_ig_yield,fed_bs,
+       brent_crude,usd_eur,nat_gas,eur_hy_yield,ecb_bs,eur_10yr_yield,eur_cli,
+       us_hy_yield,us_ig_yield,yield10yr,yield20yr,us_pce_12m,eur_cpi_12mo,
+       u_mich_inflation,breakeven_10yr,us_pce_3mo,eur_cpi_3mo) %>%
   group_by(symbol) %>%
   fill(div_yield)
 
-#Convert to percent dividend yields and then remove adjusted price variable
+#Convert to percent dividend yields
 yieldspread_full <- yieldspread_full %>%
-  mutate(div_yield = div_yield/adjusted)
+  mutate(div_yield = div_yield/close)
 
-#Remove any rows we don't have price data for
-yieldspread_full <- yieldspread_full %>%
-  filter(!is.na(adjusted))
+#Visualize dividend yields
+yieldspread_full %>%
+  filter(!is.na(div_yield) & symbol != "VGK") %>%
+  ggplot(aes(x=date,y=div_yield)) +
+  geom_line() + facet_wrap(vars(symbol))
+
+
+
+# Calculate Trailing Period Change Variables ------------------------------
+
+
+
+# #Create a vector of variables to try transforming to period-over-period change,
+# #and a corresponding list of which ETFs to train each variable on.
+# vars_to_tune <- c("us_equities_allocation","vix","fed_bs", #US only
+#                   "ecb_bs","usd_eur", #Europe only
+#                   "dxy","industrial_materials","raw_materials","brent_crude",
+#                   "nat_gas") #US, Europe, and EM
+# etfs_to_tune_on <- list(c("VOO","TLT","GOVT","VCLT"),
+#                         c("VOO","TLT","GOVT","VCLT"),
+#                         c("VOO","TLT","GOVT","VCLT"),
+#                         c("VGK"),
+#                         c("VGK"),
+#                         c("VOO","TLT","GOVT","VGK","IEMG","EMHY","VWOB"),
+#                         c("VOO","TLT","GOVT","VGK","IEMG","EMHY","VWOB"),
+#                         c("VOO","TLT","GOVT","VGK","IEMG","EMHY","VWOB"),
+#                         c("VOO","TLT","GOVT","VGK","IEMG","EMHY","VWOB"),
+#                         c("VOO","TLT","GOVT","VGK","IEMG","EMHY","VWOB"))
+#
+# #Tune the right lengths for period-over-period change variables, then calculate.
+# #(I simply tune by maximizing correlation coefficient, though a full-fledged
+# #cross-validation would be better.)
+# optimal_lengths <- map2_dfr(vars_to_tune,etfs_to_tune_on,function(v,e){
+#
+#   #Select only the variables we're interested in, standardize variable name
+#   yieldspread_full <- yieldspread_full[c("date",v,"return_6_mo","return_1_yr",
+#                                          "return_2_yr","return_3_yr","symbol")]
+#   names(yieldspread_full) <- c("date","ourvar","return_6_mo","return_1_yr",
+#                                "return_2_yr","return_3_yr","symbol")
+#
+#   #For lengths in months from 1 to 24, find the length that maximizes correlation
+#   #across multiple ETFs
+#   optimal_length <- map_dfr(1:24,function(length){
+#
+#     #Calculate a period-over-period change variable of the given length
+#     yieldspread_full <- yieldspread_full %>%
+#       group_by(symbol) %>%
+#       mutate(change_var = ourvar - lag(ourvar,round(length*365.25/12)))
+#
+#     #For each of the various ETFs we're targeting, find the average of the absolute
+#     #values of our change variables's correlation to returns
+#     avg_cor <- map(e,function(etf){
+#       corchecker(yieldspread_full,ticker = etf,vars_to_test = "change_var")["avg_of_abs_vals"]
+#     }) %>% unlist() %>% mean()
+#
+#     return(data.frame(len = length,cor = avg_cor))
+#
+#   }) %>% slice_max(cor) %>% pull(len)
+#
+#   return(data.frame(variable = v,length = optimal_length))
+#
+# })
+#
+# #Calculate change variables of the desired lengths
+# #Get rid of negative values that will screw up log transformation
+# change_vars <- map(1:nrow(optimal_lengths),function(n){
+#   df <- yieldspread_full[c("date","symbol",optimal_lengths[n,1])] %>%
+#     group_by(symbol)
+#   df[3] <- df[3] - lag(df[3],round(optimal_lengths[n,2]*365.25/12))
+#   df[3] <- (df[3]-min(df[3],na.rm=T))/(max(df[3],na.rm=T)-min(df[3],na.rm=T))+1
+#   return(df)
+# }) %>% reduce(full_join,by=c("date","symbol"))
+#
+# #Assign descriptive names to change variables
+# optimal_lengths <- optimal_lengths %>%
+#   mutate(variable = paste0("change_in_",variable))
+# names(change_vars) <- c("date","symbol",optimal_lengths$variable)
+#
+# #Join change variables with yieldspread_full
+# yieldspread_full <- full_join(yieldspread_full,change_vars)
+#
+# #NA prices can either stay in the data frame or not, but perhaps best to
+# #remove them (only after performing all tuning/transformations.)
+# yieldspread_full <- yieldspread_full %>%
+#   filter(!is.na(adjusted))
 
 
 
 # Analyze S&P 500 Returns -------------------------------------------------
 
 
+
 #Define a ticker and a list of variables to study
 ticker_to_study <- "VOO"
 varlist <- c("us_spread","yield7yr","dxy","vix","div_yield",
-             "cli_lead_us","equities_allocation_12m_change","equities_allocation_18m_change",
-             "industrial_materials","raw_materials")
-
-#Calculate correlation coefficients between variables of interest and next-period return
-cors <- yieldspread_full %>%
-  corchecker(ticker = ticker_to_study,
-                   vars_to_test = varlist)
-
-#Print correlation coefficients in readable format
-cors %>%
-  knitr::kable(caption = paste("Correlation coefficients for various variables and next-period",ticker_to_study,"returns"))
-
-#Winnow list of variables to study, keeping only the top 5
-varlist <- row.names(cors[1:5,])
-
-#Delete correlation coefficients table from workspace
-rm(cors)
+             "cli_lead_us","industrial_materials","raw_materials","us_pce_12m",
+             "u_mich_inflation","breakeven_10yr","us_pce_3mo"
+             # ,"change_in_us_equities_allocation","change_in_vix",
+             # "change_in_fed_bs","change_in_dxy",
+             # "change_in_industrial_materials","change_in_raw_materials",
+             # "change_in_brent_crude","change_in_nat_gas"
+             )
 
 #Filter dataset to keep only the data we're interested in
 yieldspread <- yieldspread_full %>%
@@ -854,6 +698,21 @@ yieldspread <- yieldspread_full %>%
 #Partition time series for training, testing, and validation
 test_set <- yieldspread[yieldspread$date >= max(yieldspread$date) - years(4),]
 yieldspread <- yieldspread[yieldspread$date < max(yieldspread$date) - years(4),]
+
+#Calculate correlation coefficients between variables of interest and next-period return
+cors <- yieldspread %>%
+  corchecker(ticker = ticker_to_study,
+                   vars_to_test = varlist)
+
+#Print correlation coefficients in readable format
+cors %>%
+  knitr::kable(caption = paste("Correlation coefficients for various variables and next-period",ticker_to_study,"returns"))
+
+# #Winnow list of variables to study, keeping only the top 5
+# varlist <- row.names(cors[1:5,])
+
+#Delete correlation coefficients table from workspace
+rm(cors)
 
 #Call function to use five-fold cross-validation to compare error rates on linear
 #models that combine the selected variables
@@ -938,23 +797,13 @@ rm(sds)
 #Define a ticker and a list of variables to study
 ticker_to_study <- "GOVT"
 varlist <- c("us_spread","yield7yr","dxy","vix",
-             "cli_lead_us","industrial_materials","raw_materials",
-             "equities_allocation_12m_change","equities_allocation_18m_change")
-
-#Calculate correlation coefficients between variables of interest and next-period return
-cors <- corchecker(df = yieldspread_full,
-                   ticker = ticker_to_study,
-                   vars_to_test = varlist)
-
-#Print correlation coefficients in readable format
-cors %>%
-  knitr::kable(caption = paste("Correlation coefficients for various variables and next-period",ticker_to_study,"returns"))
-
-#Winnow list of variables to study, keeping only the top 5
-varlist <- row.names(cors[1:5,])
-
-#Delete correlation coefficients table from workspace
-rm(cors)
+             "cli_lead_us","industrial_materials","raw_materials","us_pce_12m",
+             "u_mich_inflation","breakeven_10yr","us_pce_3mo"
+             # ,"change_in_us_equities_allocation","change_in_vix",
+             # "change_in_fed_bs","change_in_dxy",
+             # "change_in_industrial_materials","change_in_raw_materials",
+             # "change_in_brent_crude","change_in_nat_gas"
+             )
 
 #Filter dataset to keep only the data we're interested in
 yieldspread <- yieldspread_full %>%
@@ -966,6 +815,21 @@ yieldspread <- yieldspread_full %>%
 #Partition time series for training, testing, and validation
 test_set <- yieldspread[yieldspread$date >= max(yieldspread$date) - years(4),]
 yieldspread <- yieldspread[yieldspread$date < max(yieldspread$date) - years(4),]
+
+#Calculate correlation coefficients between variables of interest and next-period return
+cors <- corchecker(df = yieldspread,
+                   ticker = ticker_to_study,
+                   vars_to_test = varlist)
+
+#Print correlation coefficients in readable format
+cors %>%
+  knitr::kable(caption = paste("Correlation coefficients for various variables and next-period",ticker_to_study,"returns"))
+
+# #Winnow list of variables to study, keeping only the top 5
+# varlist <- row.names(cors[1:5,])
+
+#Delete correlation coefficients table from workspace
+rm(cors)
 
 #Call function to use five-fold cross-validation to compare error rates on linear
 #models that combine the selected variables
@@ -1050,23 +914,13 @@ rm(sds)
 #Define a ticker and a list of variables to study
 ticker_to_study <- "TLT"
 varlist <- c("us_spread","yield20yr","dxy","vix",
-             "cli_lead_us","industrial_materials","raw_materials",
-             "equities_allocation_12m_change","equities_allocation_18m_change")
-
-#Calculate correlation coefficients between variables of interest and next-period return
-cors <- corchecker(df = yieldspread_full,
-                   ticker = ticker_to_study,
-                   vars_to_test = varlist)
-
-#Print correlation coefficients in readable format
-cors %>%
-  knitr::kable(caption = paste("Correlation coefficients for various variables and next-period",ticker_to_study,"returns"))
-
-#Winnow list of variables to study, keeping only the top 5
-varlist <- row.names(cors[1:5,])
-
-#Delete correlation coefficients table from workspace
-rm(cors)
+             "cli_lead_us","industrial_materials","raw_materials","us_pce_12m",
+             "u_mich_inflation","breakeven_10yr","us_pce_3mo"
+             # ,"change_in_us_equities_allocation","change_in_vix",
+             # "change_in_fed_bs","change_in_dxy",
+             # "change_in_industrial_materials","change_in_raw_materials",
+             # "change_in_brent_crude","change_in_nat_gas"
+             )
 
 #Filter dataset to keep only the data we're interested in
 yieldspread <- yieldspread_full %>%
@@ -1078,6 +932,21 @@ yieldspread <- yieldspread_full %>%
 #Partition time series for training, testing, and validation
 test_set <- yieldspread[yieldspread$date >= max(yieldspread$date) - years(4),]
 yieldspread <- yieldspread[yieldspread$date < max(yieldspread$date) - years(4),]
+
+#Calculate correlation coefficients between variables of interest and next-period return
+cors <- corchecker(df = yieldspread,
+                   ticker = ticker_to_study,
+                   vars_to_test = varlist)
+
+#Print correlation coefficients in readable format
+cors %>%
+  knitr::kable(caption = paste("Correlation coefficients for various variables and next-period",ticker_to_study,"returns"))
+
+# #Winnow list of variables to study, keeping only the top 5
+# varlist <- row.names(cors[1:5,])
+
+#Delete correlation coefficients table from workspace
+rm(cors)
 
 #Call function to use five-fold cross-validation to compare error rates on linear
 #models that combine the selected variables
@@ -1162,22 +1031,11 @@ rm(sds)
 #Define a ticker and a list of variables to study
 ticker_to_study <- "VWOB"
 varlist <- c("em_spread","em_govt_yield","dxy",
-             "industrial_materials","raw_materials")
-
-#Calculate correlation coefficients between variables of interest and next-period return
-cors <- corchecker(df = yieldspread_full,
-                   ticker = ticker_to_study,
-                   vars_to_test = varlist)
-
-#Print correlation coefficients in readable format
-cors %>%
-  knitr::kable(caption = paste("Correlation coefficients for various variables and next-period",ticker_to_study,"returns"))
-
-#Winnow list of variables to study, keeping only those with average correlation > .3
-varlist <- row.names(cors[1:5,])
-
-#Delete correlation coefficients table from workspace
-rm(cors)
+             "industrial_materials","raw_materials"
+             # ,"change_in_dxy",
+             # "change_in_industrial_materials","change_in_raw_materials",
+             # "change_in_brent_crude","change_in_nat_gas"
+             )
 
 #Filter dataset to keep only the data we're interested in
 yieldspread <- yieldspread_full %>%
@@ -1189,6 +1047,21 @@ yieldspread <- yieldspread_full %>%
 #Partition time series for training, testing, and validation
 test_set <- yieldspread[yieldspread$date >= max(yieldspread$date) - years(4),]
 yieldspread <- yieldspread[yieldspread$date < max(yieldspread$date) - years(4),]
+
+#Calculate correlation coefficients between variables of interest and next-period return
+cors <- corchecker(df = yieldspread,
+                   ticker = ticker_to_study,
+                   vars_to_test = varlist)
+
+#Print correlation coefficients in readable format
+cors %>%
+  knitr::kable(caption = paste("Correlation coefficients for various variables and next-period",ticker_to_study,"returns"))
+
+# #Winnow list of variables to study, keeping only tthe top 5
+# varlist <- row.names(cors[1:5,])
+
+#Delete correlation coefficients table from workspace
+rm(cors)
 
 #Call function to use five-fold cross-validation to compare error rates on linear
 #models that combine the selected variables
@@ -1273,23 +1146,13 @@ rm(sds)
 #Define a ticker and a list of variables to study
 ticker_to_study <- "VCLT"
 varlist <- c("yield10yr","yield20yr","us_spread","us_ig_yield","dxy","vix",
-             "cli_lead_us","raw_materials","industrial_materials",
-             "equities_allocation_12m_change","equities_allocation_18m_change")
-
-#Calculate correlation coefficients between variables of interest and next-period return
-cors <- corchecker(df = yieldspread_full,
-                   ticker = ticker_to_study,
-                   vars_to_test = varlist)
-
-#Print correlation coefficients in readable format
-cors %>%
-  knitr::kable(caption = paste("Correlation coefficients for various variables and next-period",ticker_to_study,"returns"))
-
-#Winnow list of variables to study, keeping only the top 5
-varlist <- row.names(cors[1:5,])
-
-#Delete correlation coefficients table from workspace
-rm(cors)
+             "cli_lead_us","raw_materials","industrial_materials","us_pce_12m",
+             "u_mich_inflation","breakeven_10yr","us_pce_3mo"
+             # ,"change_in_us_equities_allocation","change_in_vix",
+             # "change_in_fed_bs","change_in_dxy",
+             # "change_in_industrial_materials","change_in_raw_materials",
+             # "change_in_brent_crude","change_in_nat_gas"
+             )
 
 #Filter dataset to keep only the data we're interested in
 yieldspread <- yieldspread_full %>%
@@ -1301,6 +1164,21 @@ yieldspread <- yieldspread_full %>%
 #Partition time series for training, testing, and validation
 test_set <- yieldspread[yieldspread$date >= max(yieldspread$date) - years(4),]
 yieldspread <- yieldspread[yieldspread$date < max(yieldspread$date) - years(4),]
+
+#Calculate correlation coefficients between variables of interest and next-period return
+cors <- corchecker(df = yieldspread,
+                   ticker = ticker_to_study,
+                   vars_to_test = varlist)
+
+#Print correlation coefficients in readable format
+cors %>%
+  knitr::kable(caption = paste("Correlation coefficients for various variables and next-period",ticker_to_study,"returns"))
+
+# #Winnow list of variables to study, keeping only the top 5
+# varlist <- row.names(cors[1:5,])
+
+#Delete correlation coefficients table from workspace
+rm(cors)
 
 #Call function to use five-fold cross-validation to compare error rates on linear
 #models that combine the selected variables
@@ -1384,22 +1262,11 @@ rm(sds)
 
 #Define a ticker and a list of variables to study
 ticker_to_study <- "EMHY"
-varlist <- c("em_spread","em_hy_yield","em_govt_yield","raw_materials","industrial_materials")
-
-#Calculate correlation coefficients between variables of interest and next-period return
-cors <- corchecker(df = yieldspread_full,
-                   ticker = ticker_to_study,
-                   vars_to_test = varlist)
-
-#Print correlation coefficients in readable format
-cors %>%
-  knitr::kable(caption = paste("Correlation coefficients for various variables and next-period",ticker_to_study,"returns"))
-
-#Winnow list of variables to study, keeping only those with average correlation > .3
-varlist <- row.names(cors[1:5,])
-
-#Delete correlation coefficients table from workspace
-rm(cors)
+varlist <- c("em_spread","em_hy_yield","em_govt_yield","raw_materials","industrial_materials"
+             # ,"change_in_dxy","change_in_industrial_materials",
+             # "change_in_raw_materials","change_in_brent_crude",
+             # "change_in_nat_gas"
+             )
 
 #Filter dataset to keep only the data we're interested in
 yieldspread <- yieldspread_full %>%
@@ -1411,6 +1278,21 @@ yieldspread <- yieldspread_full %>%
 #Partition time series for training, testing, and validation
 test_set <- yieldspread[yieldspread$date >= max(yieldspread$date) - years(4),]
 yieldspread <- yieldspread[yieldspread$date < max(yieldspread$date) - years(4),]
+
+#Calculate correlation coefficients between variables of interest and next-period return
+cors <- corchecker(df = yieldspread,
+                   ticker = ticker_to_study,
+                   vars_to_test = varlist)
+
+#Print correlation coefficients in readable format
+cors %>%
+  knitr::kable(caption = paste("Correlation coefficients for various variables and next-period",ticker_to_study,"returns"))
+
+# #Winnow list of variables to study, keeping only the top 5
+# varlist <- row.names(cors[1:5,])
+
+#Delete correlation coefficients table from workspace
+rm(cors)
 
 #Call function to use five-fold cross-validation to compare error rates on linear
 #models that combine the selected variables
@@ -1495,28 +1377,16 @@ rm(sds)
 #Define a ticker and a list of variables to study
 ticker_to_study <- "IEMG"
 varlist <- c("em_spread","div_yield","em_govt_yield","em_ig_discount","dxy",
-             "raw_materials","industrial_materials")
-
-#Calculate correlation coefficient between variables of interest and next-period return
-#Try out new variable subtracting EM investment-grade yield from US high yield
-#(Perhaps this works because EM IG companies compete with the junkiest US sectors,
-#like mining and oil and gas?)
-cors <- yieldspread_full %>%
-  mutate(em_ig_discount = us_hy_yield - em_ig_yield) %>%
-  corchecker(ticker = ticker_to_study,
-             vars_to_test = varlist)
-
-#Print correlation coefficients in readable format
-cors %>%
-  knitr::kable(caption = paste("Correlation coefficients for various variables and next-period",ticker_to_study,"returns"))
-
-#Winnow list of variables to study, keeping only the top 5
-varlist <- row.names(cors[1:5,])
-
-#Delete correlation coefficients table from workspace
-rm(cors)
+             "raw_materials","industrial_materials"
+             # ,"change_in_dxy","change_in_industrial_materials",
+             # "change_in_raw_materials","change_in_brent_crude",
+             # "change_in_nat_gas"
+             )
 
 #Filter dataset to keep only the data we're interested in
+#Try out variable subtracting EM investment-grade yield from US high yield
+#(Perhaps this works because EM IG companies compete with the junkiest US sectors,
+#like mining and oil and gas?)
 yieldspread <- yieldspread_full %>%
   filter(symbol == ticker_to_study) %>%
   mutate(em_ig_discount = us_hy_yield - em_ig_yield) %>%
@@ -1527,6 +1397,21 @@ yieldspread <- yieldspread_full %>%
 #Partition time series for training, testing, and validation
 test_set <- yieldspread[yieldspread$date >= max(yieldspread$date) - years(4),]
 yieldspread <- yieldspread[yieldspread$date < max(yieldspread$date) - years(4),]
+
+#Calculate correlation coefficient between variables of interest and next-period return
+cors <- yieldspread %>%
+  corchecker(ticker = ticker_to_study,
+             vars_to_test = varlist)
+
+#Print correlation coefficients in readable format
+cors %>%
+  knitr::kable(caption = paste("Correlation coefficients for various variables and next-period",ticker_to_study,"returns"))
+
+# #Winnow list of variables to study, keeping only the top 5
+# varlist <- row.names(cors[1:5,])
+
+#Delete correlation coefficients table from workspace
+rm(cors)
 
 #Call function to use five-fold cross-validation to compare error rates on linear
 #models that combine the selected variables
@@ -1611,23 +1496,13 @@ rm(sds)
 
 #Define a ticker and a list of variables to study
 ticker_to_study <- "VGK"
-varlist <- c("eur_spread","dxy","div_yield",
-             "cli_lead_us","raw_materials","industrial_materials")
-
-#Calculate correlation coefficients between variables of interest and next-period return
-cors <- corchecker(df = yieldspread_full,
-                   ticker = ticker_to_study,
-                   vars_to_test = varlist)
-
-#Print correlation coefficients in readable format
-cors %>%
-  knitr::kable(caption = paste("Correlation coefficients for various variables and next-period",ticker_to_study,"returns"))
-
-#Winnow list of variables to study, keeping only those with average correlation > .3
-varlist <- row.names(cors[1:5,])
-
-#Delete correlation coefficients table from workspace
-rm(cors)
+varlist <- c("eur_spread","dxy","div_yield","raw_materials","industrial_materials",
+             "brent_crude","usd_eur","nat_gas","eur_hy_yield","ecb_bs",
+             "eur_10yr_yield","eur_cli","eur_cpi_12mo","eur_cpi_3mo"
+             # ,"change_in_ecb_bs","change_in_usd_eur","change_in_dxy",
+             # "change_in_industrial_materials","change_in_raw_materials",
+             # "change_in_brent_crude","change_in_nat_gas"
+             )
 
 #Filter dataset to keep only the data we're interested in
 yieldspread <- yieldspread_full %>%
@@ -1639,6 +1514,21 @@ yieldspread <- yieldspread_full %>%
 #Partition time series for training, testing, and validation
 test_set <- yieldspread[yieldspread$date >= max(yieldspread$date) - years(4),]
 yieldspread <- yieldspread[yieldspread$date < max(yieldspread$date) - years(4),]
+
+#Calculate correlation coefficients between variables of interest and next-period return
+cors <- corchecker(df = yieldspread,
+                   ticker = ticker_to_study,
+                   vars_to_test = varlist)
+
+#Print correlation coefficients in readable format
+cors %>%
+  knitr::kable(caption = paste("Correlation coefficients for various variables and next-period",ticker_to_study,"returns"))
+
+# #Winnow list of variables to study, keeping only the top 5
+# varlist <- row.names(cors[1:5,])
+
+#Delete correlation coefficients table from workspace
+rm(cors)
 
 #Call function to use five-fold cross-validation to compare error rates on linear
 #models that combine the selected variables
@@ -1771,20 +1661,27 @@ ggsave(filename = "multi-asset-model.jpg",
 
 
 
-# In calculating percent dividend yield, should I be using close or adjusted price?
-
 # Near-term development ideas:
-# Dream up some other new variables to test, in the hope of conquering my last
-# undefeated naive average (on VGK).
-# Maybe try a PCE inflation series? A YoY change in yields/inflation series?
+
+# Rewrite my code in such a way that I can choose which return timeframes to
+# use by simply changing a variable.
+
+# I need to handle tuning the change variables at the same time that I do
+# cross-validation for model building, so as to avoid overtraining. First train
+# these variables, then train bivariate models. Maybe take the top few bivariate
+# models and try multivariate models with those variables?
+
+# My change variables all perform very poorly, which makes me a little suspicious
+# of how they're being calculated. Make sure they're being calculated correctly.
+
 # Explore using P/E or earnings yield rather than div yield to predict index returns?
 # (Dividend yield is problematic because it's a poor proxy for shareholder yield)
-# FRED no longer provides ISM manufacturing PMI; I should see if I can automate
-# retrieval of this data for testing. (Data through 2015 available here:
-# https://data.nasdaq.com/data/FRED/NAPM-ism-manufacturing-pmi-composite-index)
-# Also try Fed balance sheet.
+# Can I find a higher-frequency P/E series than multpl.com? Can I find series for
+# Europe & EM?
+
 # Try reverse repo, maybe with a stochastic transformation
 
 # Future development ideas:
+
 # Try optimizing a rebalance model, maybe using decision trees?
 # Would be interesting to see how different US sectors react to yields and yield spreads
