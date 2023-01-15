@@ -33,6 +33,10 @@ readRenviron("~/.Renviron")
 
 
 
+#Select what timeframes to optimize returns over (in years)
+#Use a comma-separated vector; optimally no more than four
+timeframes_to_optimize <- c(1)
+
 #Define function to get and combine multiple FRED series into a single data frame
 get_freds <- function(symbols,varnames){
   map2_dfr(symbols,varnames,function(s,v){
@@ -90,7 +94,7 @@ global_optimizer <- list(RMSE,"RMSE")
 corchecker <- function(df = yieldspread_full,ticker = c("VOO"),vars_to_test = c("us_spread")){
   df <- df %>%
     filter(symbol %in% ticker)
-  df1 <- map_dfr(c("return_6_mo","return_1_yr","return_2_yr","return_3_yr"),function(returns_to_check){
+  df1 <- map_dfr(paste0("return_",timeframes_to_optimize,"_yr"),function(returns_to_check){
     data.frame(cor(subset(df,select=returns_to_check),subset(df,select=vars_to_test),use="complete.obs"))
   })
   df2 <- df1 %>% lapply(abs) %>% sapply(mean) %>% t() %>% data.frame()
@@ -105,10 +109,9 @@ corchecker <- function(df = yieldspread_full,ticker = c("VOO"),vars_to_test = c(
 cross_validator <- function(variables_to_study){
 
   #Split time series and create indexes for five-fold cross-validation
-  test_index_0 <- splitTimeSeries(yieldspread$return_6_mo,k=5)
-  test_index_1 <- splitTimeSeries(yieldspread$return_1_yr,k=5)
-  test_index_2 <- splitTimeSeries(yieldspread$return_2_yr,k=5)
-  test_index_3 <- splitTimeSeries(yieldspread$return_3_yr,k=5)
+  test_index <- map(paste0("return_",timeframes_to_optimize,"_yr"),function(v){
+    splitTimeSeries(yieldspread[v],k=5)
+    })
 
   #Find all unique combinations of up to two of the variables we're testing,
   #either linear or log. Delete any combos that have a linear and log of the same
@@ -126,49 +129,39 @@ cross_validator <- function(variables_to_study){
   errors <- map_dfr(.x = 1:5,optimizer = global_optimizer[[1]],.f = function(x,optimizer){
 
     #Partition data using the indexes we generated
-    train_set_0 <- yieldspread[-test_index_0[[x]],]
-    train_set_1 <- yieldspread[-test_index_1[[x]],]
-    train_set_2 <- yieldspread[-test_index_2[[x]],]
-    train_set_3 <- yieldspread[-test_index_3[[x]],]
-    test_set_0 <- yieldspread[test_index_0[[x]],]
-    test_set_1 <- yieldspread[test_index_1[[x]],]
-    test_set_2 <- yieldspread[test_index_2[[x]],]
-    test_set_3 <- yieldspread[test_index_3[[x]],]
+    train_set <- map(1:length(test_index),function(item){
+      yieldspread[-test_index[[item]][[x]],]
+    })
+    test_set <- map(1:length(test_index),function(item){
+      yieldspread[test_index[[item]][[x]],]
+    })
 
     #Omit from training set any returns that overlap the first date in test set
-    suppressWarnings(train_set_0$return_6_mo <- case_when(between(test_set_0$date[1] - train_set_0$date,0,365*0.5)~NA_real_,
-                                           T~train_set_0$return_6_mo))
-    suppressWarnings(train_set_1$return_1_yr <- case_when(between(test_set_1$date[1] - train_set_1$date,0,365*1)~NA_real_,
-                                           T~train_set_1$return_1_yr))
-    suppressWarnings(train_set_2$return_2_yr <- case_when(between(test_set_2$date[1] - train_set_2$date,0,365*2)~NA_real_,
-                                           T~train_set_2$return_2_yr))
-    suppressWarnings(train_set_3$return_3_yr <- case_when(between(test_set_3$date[1] - train_set_3$date,0,365*3)~NA_real_,
-                                           T~train_set_3$return_3_yr))
+    train_set <- map2(1:length(timeframes_to_optimize),timeframes_to_optimize,function(a,b){
+      train_set[[a]][[paste0("return_",b,"_yr")]] <- suppressWarnings(case_when(between(test_set[[a]]$date[1] - train_set[[a]]$date,0,365*b)~NA_real_,
+                                           T~train_set[[a]][[paste0("return_",b,"_yr")]]))
+      return(train_set[[a]])
+    })
 
-    #Create models on training data, predict on test data, and calculate error
+    #Create models on training data, predict on test data
+    actuals <- unlist(map2(1:length(timeframes_to_optimize),timeframes_to_optimize,function(a,b){
+      test_set[[a]][[paste0("return_",b,"_yr")]]
+    }))
+    model_forecasts <- function(y){unlist(map2(1:length(timeframes_to_optimize),timeframes_to_optimize,function(a,b){
+      predict(lm(formula = paste0("return_",b,"_yr ~ ",paste(varcombos[[y]],collapse="+")),data=train_set[[a]]),newdata=test_set[[a]])
+    }))}
+    naive_forecasts <- unlist(map2(1:length(timeframes_to_optimize),timeframes_to_optimize,function(a,b){
+      rep(mean(train_set[[a]][[paste0("return_",b,"_yr")]],na.rm=T),length(test_set[[a]][[paste0("return_",b,"_yr")]]))
+    }))
+
+    #Calculate error
     map_dfr(1:length(varcombos),function(y){
       data.frame(model = paste(varcombos[[y]],collapse="+"),
                  trial = x,
-                 error_measure = optimizer(c(test_set_0$return_6_mo,
-                                             test_set_1$return_1_yr,
-                                             test_set_2$return_2_yr,
-                                             test_set_3$return_3_yr),
-                                           c(predict(lm(formula = paste0("return_6_mo ~ ",paste(varcombos[[y]],collapse="+")),data=train_set_0),newdata=test_set_0),
-                                             predict(lm(formula = paste0("return_1_yr ~ ",paste(varcombos[[y]],collapse="+")),data=train_set_1),newdata=test_set_1),
-                                             predict(lm(formula = paste0("return_2_yr ~ ",paste(varcombos[[y]],collapse="+")),data=train_set_2),newdata=test_set_2),
-                                             predict(lm(formula = paste0("return_3_yr ~ ",paste(varcombos[[y]],collapse="+")),data=train_set_3),newdata=test_set_3))))
+                 error_measure = optimizer(actuals,model_forecasts(y)))
     }) %>% bind_rows(.,data.frame(model = "naive_average",
                                   trial = x,
-                                  error_measure = optimizer(
-                                    c(test_set_0$return_6_mo,
-                                      test_set_1$return_1_yr,
-                                      test_set_2$return_2_yr,
-                                      test_set_3$return_3_yr),
-                                    c(rep(mean(train_set_0$return_6_mo,na.rm=T),length(test_set_0$return_6_mo)),
-                                      rep(mean(train_set_1$return_1_yr,na.rm=T),length(test_set_1$return_1_yr)),
-                                      rep(mean(train_set_2$return_2_yr,na.rm=T),length(test_set_2$return_2_yr)),
-                                      rep(mean(train_set_3$return_3_yr,na.rm=T),length(test_set_3$return_3_yr)))
-                                  )))
+                                  error_measure = optimizer(actuals,naive_forecasts)))
   })
 }
 
@@ -176,35 +169,23 @@ cross_validator <- function(variables_to_study){
 #to tidy data frame for charting
 tidify <- function(df){
 
-    df[,c("date",
-        "return_6_mo","return_1_yr","return_2_yr","return_3_yr",
+  df[,c("date",
+        paste0("return_",timeframes_to_optimize,"_yr"),
         varlist)] %>%
-    gather("timeframe","value",return_6_mo,return_1_yr,return_2_yr,return_3_yr) %>%
-    mutate(naive_forecast = case_when(timeframe == "return_6_mo" ~ mean(yieldspread$return_6_mo,na.rm=T),
-                                      timeframe == "return_1_yr" ~ mean(yieldspread$return_1_yr,na.rm=T),
-                                      timeframe == "return_2_yr" ~ mean(yieldspread$return_2_yr,na.rm=T),
-                                      timeframe == "return_3_yr" ~ mean(yieldspread$return_3_yr,na.rm=T),
-                                      TRUE ~ NA_real_)) %>%
-    mutate(forecast = case_when(timeframe == "return_6_mo" ~ predict(object=model_6mo,newdata=.),
-                                timeframe == "return_1_yr" ~ predict(object=model_1yr,newdata=.),
-                                timeframe == "return_2_yr" ~ predict(object=model_2yr,newdata=.),
-                                timeframe == "return_3_yr" ~ predict(object=model_3yr,newdata=.),
-                                TRUE ~ NA_real_)) %>%
+    gather("timeframe","value",paste0("return_",timeframes_to_optimize,"_yr")) %>%
+    left_join(.,data.frame(timeframe = paste0("return_",timeframes_to_optimize,"_yr"),
+                           time_length = timeframes_to_optimize,
+                           index = 1:length(timeframes_to_optimize))) %>%
+    group_by(timeframe) %>%
+    mutate(naive_forecast = mean(yieldspread[[first(timeframe)]],na.rm=T)) %>%
+    mutate(forecast = predict(object=models[[first(index)]],newdata=cur_data())) %>%
+    ungroup() %>%
     filter(!is.na(forecast)) %>%
-    mutate(label = case_when(date == max(date) & timeframe == "return_6_mo" ~ paste(scales::percent(round(forecast,2),accuracy=1),"expected\n6-month ARR"),
-                             date == max(date) & timeframe == "return_1_yr" ~ paste(scales::percent(round(forecast,2),accuracy=1),"expected\n1-year ARR"),
-                             date == max(date) & timeframe == "return_2_yr" ~ paste(scales::percent(round(forecast,2),accuracy=1),"expected\n2-year ARR"),
-                             date == max(date) & timeframe == "return_3_yr" ~ paste(scales::percent(round(forecast,2),accuracy=1),"expected\n3-year ARR"),
+    mutate(label = case_when(date == max(date) ~ paste0(scales::percent(round(forecast,2),accuracy=1)," expected\n,",time_length,"-year ARR"),
                              TRUE ~ NA_character_)) %>%
-    mutate(timeframe = case_when(timeframe == "return_6_mo" ~ "6-month forward return",
-                                 timeframe == "return_1_yr" ~ "1-year forward return",
-                                 timeframe == "return_2_yr" ~ "2-year forward return",
-                                 timeframe == "return_3_yr" ~ "3-year forward return",
-                                 TRUE ~ NA_character_)) %>%
-    mutate(timeframe = factor(timeframe,levels=c("6-month forward return",
-                                                 "1-year forward return",
-                                                 "2-year forward return",
-                                                 "3-year forward return")))
+    mutate(timeframe = paste0(time_length,"-year forward return")) %>%
+    mutate(timeframe = factor(timeframe,levels=paste0(timeframes_to_optimize,"-year forward return"))) %>%
+    select(-time_length)
 
 }
 
@@ -216,18 +197,21 @@ chartit <- function(df=test_set,insample=F){
   #Prep new_data, using today's value for forecasting non-focus variables but
   #historical values for forecasting the focus variable
   new_data <- df %>%
-    .[varlist]
+    .[c(varlist,"index")]
   for(x in 1:length(new_data)){
-    if(names(new_data[,x]) != focus_var){new_data[,x] <- last(new_data[!is.na(new_data[,x]),x])}
+    if(names(new_data[,x]) != focus_var &
+       names(new_data[,x]) != "index"){new_data[,x] <- last(new_data[!is.na(new_data[,x]),x])}
   }
+
+  #Calculate adjusted forecasts, subtracting non-focus variable effects
+  df$adj_forecast <- new_data %>%
+    group_by(index) %>%
+    mutate(adj_forecast = predict(object=models[[first(index)]],newdata=cur_data())) %>%
+    ungroup() %>%
+    pull(adj_forecast)
 
   #Chart forward actual and modeled returns against focus variable
   df %>%
-    mutate(adj_forecast = case_when(timeframe == "6-month forward return" ~ predict(object=model_6mo,newdata=new_data),
-                                    timeframe == "1-year forward return" ~ predict(object=model_1yr,newdata=new_data),
-                                    timeframe == "2-year forward return" ~ predict(object=model_2yr,newdata=new_data),
-                                    timeframe == "3-year forward return" ~ predict(object=model_3yr,newdata=new_data),
-                                    TRUE ~ NA_real_)) %>%
     mutate(value=value+(adj_forecast-forecast)) %>%
     mutate(highlight = !is.na(label)) %>%
     ggplot(aes(x=.data[[focus_var]],y=value)) +
@@ -236,7 +220,7 @@ chartit <- function(df=test_set,insample=F){
     geom_point(aes(y=adj_forecast,color=highlight,alpha=highlight),size=3) +
     geom_hline(aes(yintercept=adj_forecast,color=highlight,alpha=highlight),lwd=1,linetype="dashed") +
     geom_text(aes(y=adj_forecast,label=label),col="red",size=4,fontface = "bold",hjust="inward") +
-    facet_wrap(vars(timeframe),ncol=2,nrow=2) +
+    facet_wrap(vars(timeframe),ncol=ceiling(length(timeframes_to_optimize)/2),nrow=ceiling(length(timeframes_to_optimize)/2)) +
     labs(title=paste0(ticker_to_study," forward annualized rate of return (ARR) vs. ",focus_var),
          subtitle = paste0("Charted against ",
                      case_when(insample==F~"out-of-sample data",
@@ -298,7 +282,8 @@ get_sharpes <- function(){
   #Join sds table with risk-free rate table
   sds <- sds %>%
     select(timeframe = Timeframe,model_sd = `Model`)
-  sharpe <- left_join(sds,risk_free_rate)
+  sharpe <- sds
+  # sharpe <- left_join(sds,risk_free_rate)
 
   #Get model forecasts for the most recent date
   if(use_model==T){
@@ -399,6 +384,11 @@ yieldspread_full$eur_cpi_3mo[!is.na(yieldspread_full$eur_cpi_3mo)] <- (yieldspre
                                                                        lag(yieldspread_full$eur_cpi_3mo[!is.na(yieldspread_full$eur_cpi_3mo)],n=1))/lag(yieldspread_full$eur_cpi_3mo[!is.na(yieldspread_full$eur_cpi_3mo)],n=1)
 yieldspread_full$eur_cpi_3mo[!is.na(yieldspread_full$eur_cpi_3mo)] <- EMA(yieldspread_full$eur_cpi_3mo[!is.na(yieldspread_full$eur_cpi_3mo)],n=3)
 
+#Get rid of negative values that will screw up log transformation
+yieldspread_full <- yieldspread_full %>%
+  mutate(us_pce_3mo = (us_pce_3mo-min(us_pce_3mo,na.rm=T))/(max(us_pce_3mo,na.rm=T)-min(us_pce_3mo,na.rm=T))+1,
+         eur_cpi_3mo = (eur_cpi_3mo-min(eur_cpi_3mo,na.rm=T))/(max(eur_cpi_3mo,na.rm=T)-min(eur_cpi_3mo,na.rm=T))+1)
+
 # See how correlated my yield spread variables are (.93 - .97)
 cor(yieldspread_full[c("us_spread","em_spread","eur_spread")],use="complete.obs")
 
@@ -409,20 +399,20 @@ cor(yieldspread_full[c("us_spread","em_spread","eur_spread")],use="complete.obs"
 
 
 
-#Make sure yieldspread_full is sorted by date
-yieldspread_full <- yieldspread_full %>%
-  arrange(date)
-
-#Put risk-free returns into a table
-#Use annualized returns, not total returns, for comparability
-risk_free_rate <- data.frame(timeframe = c("6-month forward return",
-                                           "1-year forward return",
-                                           "2-year forward return",
-                                           "3-year forward return"),
-                             risk_free_return = c(last(yieldspread_full$yield6mo),
-                                                  last(yieldspread_full$yield1yr),
-                                                  last(yieldspread_full$yield2yr),
-                                                  last(yieldspread_full$yield3yr)))
+# #Make sure yieldspread_full is sorted by date
+# yieldspread_full <- yieldspread_full %>%
+#   arrange(date)
+#
+# #Put risk-free returns into a table
+# #Use annualized returns, not total returns, for comparability
+# risk_free_rate <- data.frame(timeframe = c("0.5-year forward return",
+#                                            "1-year forward return",
+#                                            "2-year forward return",
+#                                            "3-year forward return"),
+#                              risk_free_return = c(last(yieldspread_full$yield6mo),
+#                                                   last(yieldspread_full$yield1yr),
+#                                                   last(yieldspread_full$yield2yr),
+#                                                   last(yieldspread_full$yield3yr)))
 
 
 
@@ -436,24 +426,19 @@ risk_free_rate <- data.frame(timeframe = c("6-month forward return",
 #Or to get CAGR c from total return r, c=(r+1)^(1/y)-1
 #For now, use simple annualized rate of return
 prices <- tq_get(c("VOO","VGK","VIOO","VTWO","GOVT","VCLT","HYG","VWOB","EMHY","IEMG","TLT"))
-prices <- prices %>%
-  group_by(symbol) %>%
-  mutate(return_6_mo = c(diff(adjusted,lag = round(252*.5)),rep(NA,times=round(252*.5)))/adjusted,
-         return_1_yr = c(diff(adjusted,lag = 252),rep(NA,times=252))/adjusted,
-         return_2_yr = c(diff(adjusted,lag = 252*2),rep(NA,times=252*2))/adjusted,
-         return_3_yr = c(diff(adjusted,lag = 252*3),rep(NA,times=252*3))/adjusted) %>%
-  mutate(return_6_mo = return_6_mo/0.5,
-         return_1_yr = return_1_yr,
-         return_2_yr = return_2_yr/2,
-         return_3_yr = return_3_yr/3)
-# mutate(cagr_6_mo = (return_6_mo+1)^(1/0.5)-1,
-#        cagr_1_yr = (return_1_yr+1)^(1)-1,
-#        cagr_2_yr = (return_2_yr+1)^(1/2)-1,
-#        cagr_3_yr = (return_3_yr+1)^(1/3)-1)
+prices <- map(timeframes_to_optimize,function(t){
+  return <- prices %>%
+    group_by(symbol) %>%
+    mutate(return = c(diff(adjusted,lag = round(252*t)),rep(NA,times=round(252*t)))/adjusted) %>%
+    mutate(return = return/t) %>%
+    pull(return)
+}) %>%
+  set_names(paste0("return_",timeframes_to_optimize,"_yr")) %>%
+  as_tibble() %>%
+  bind_cols(prices,.)
 
 #Join return data with high-yield spread data
-prices <- prices %>%
-  select(symbol,close,adjusted,date,return_6_mo,return_1_yr,return_2_yr,return_3_yr)
+prices <- prices[c("symbol","close","adjusted","date",paste0("return_",timeframes_to_optimize,"_yr"))]
 yieldspread_full <- full_join(yieldspread_full,prices,by="date")
 rm(prices)
 
@@ -620,9 +605,9 @@ yieldspread_full %>%
 # optimal_lengths <- map2_dfr(vars_to_tune,etfs_to_tune_on,function(v,e){
 #
 #   #Select only the variables we're interested in, standardize variable name
-#   yieldspread_full <- yieldspread_full[c("date",v,"return_6_mo","return_1_yr",
+#   yieldspread_full <- yieldspread_full[c("date",v,"return_0.5_yr","return_1_yr",
 #                                          "return_2_yr","return_3_yr","symbol")]
-#   names(yieldspread_full) <- c("date","ourvar","return_6_mo","return_1_yr",
+#   names(yieldspread_full) <- c("date","ourvar","return_0.5_yr","return_1_yr",
 #                                "return_2_yr","return_3_yr","symbol")
 #
 #   #For lengths in months from 1 to 24, find the length that maximizes correlation
@@ -692,7 +677,7 @@ varlist <- c("us_spread","yield7yr","dxy","vix","div_yield",
 yieldspread <- yieldspread_full %>%
   filter(symbol == ticker_to_study) %>%
   .[c("date","symbol",
-      "return_6_mo","return_1_yr","return_2_yr","return_3_yr",
+      paste0("return_",timeframes_to_optimize,"_yr"),
       varlist)]
 
 #Partition time series for training, testing, and validation
@@ -723,17 +708,16 @@ errors <- errors %>%
   group_by(model) %>%
   summarize(mean_error = mean(error_measure)) %>%
   arrange(mean_error)
-errors %>% knitr::kable(caption = paste("Mean",global_optimizer[[2]],"by model"))
+errors %>% filter(rank(mean_error)<=10) %>% knitr::kable(caption = paste("Mean",global_optimizer[[2]],"by model"))
 model_type <- errors$model[errors$model != "naive_average"][which.min(errors$mean_error[errors$model != "naive_average"])]
 use_model <- case_when(errors$model[which.min(errors$mean_error)] == "naive_average" ~ F,
                        T ~ T)
 varlist <- varlist[str_detect(model_type,varlist)]
 
 #Retrain the optimal model on the full training data set
-model_6mo <- lm(yieldspread,formula = paste0("return_6_mo ~ ",model_type))
-model_1yr <- lm(yieldspread,formula = paste0("return_1_yr ~ ",model_type))
-model_2yr <- lm(yieldspread,formula = paste0("return_2_yr ~ ",model_type))
-model_3yr <- lm(yieldspread,formula = paste0("return_3_yr ~ ",model_type))
+models <- map(timeframes_to_optimize,function(t){
+  lm(yieldspread,formula = paste0("return_",t,"_yr ~ ",model_type))
+})
 
 #Forecast returns on test set and convert to tidy data frame
 test_set <- tidify(test_set)
@@ -744,8 +728,7 @@ chartit(df = test_set,insample=F)
 
 #See if our model forecast performed better than a naive average
 compare_errors(df = test_set) %>% kable(caption = paste0("Comparing model forecast to naive forecast ",global_optimizer[[2]]))
-use_model <- case_when(compare_errors(df = test_set)[5,2] >= compare_errors(df = test_set)[5,3] &
-                         compare_errors(df = test_set)[2,2] >= compare_errors(df = test_set)[2,3] ~ F,
+use_model <- case_when(compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),2] >= compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),3]~F,
                        T ~ use_model)
 
 #Calculate model standard deviations
@@ -759,14 +742,13 @@ sds <- get_sds(df=test_set,use_model=use_model)
 yieldspread <- yieldspread_full %>%
   filter(symbol == ticker_to_study) %>%
   .[c("date","symbol",
-      "return_6_mo","return_1_yr","return_2_yr","return_3_yr",
+      paste0("return_",timeframes_to_optimize,"_yr"),
       varlist)]
 
 #Retrain the optimal model on the full training data set
-model_6mo <- lm(yieldspread,formula = paste0("return_6_mo ~ ",model_type))
-model_1yr <- lm(yieldspread,formula = paste0("return_1_yr ~ ",model_type))
-model_2yr <- lm(yieldspread,formula = paste0("return_2_yr ~ ",model_type))
-model_3yr <- lm(yieldspread,formula = paste0("return_3_yr ~ ",model_type))
+models <- map(timeframes_to_optimize,function(t){
+  lm(yieldspread,formula = paste0("return_",t,"_yr ~ ",model_type))
+})
 
 #Forecast returns on test set and convert to tidy data frame
 yieldspread <- tidify(yieldspread)
@@ -809,7 +791,7 @@ varlist <- c("us_spread","yield7yr","dxy","vix",
 yieldspread <- yieldspread_full %>%
   filter(symbol == ticker_to_study) %>%
   .[c("date","symbol",
-      "return_6_mo","return_1_yr","return_2_yr","return_3_yr",
+      paste0("return_",timeframes_to_optimize,"_yr"),
       varlist)]
 
 #Partition time series for training, testing, and validation
@@ -847,10 +829,9 @@ use_model <- case_when(errors$model[which.min(errors$mean_error)] == "naive_aver
 varlist <- varlist[str_detect(model_type,varlist)]
 
 #Retrain the optimal model on the full training data set
-model_6mo <- lm(yieldspread,formula = paste0("return_6_mo ~ ",model_type))
-model_1yr <- lm(yieldspread,formula = paste0("return_1_yr ~ ",model_type))
-model_2yr <- lm(yieldspread,formula = paste0("return_2_yr ~ ",model_type))
-model_3yr <- lm(yieldspread,formula = paste0("return_3_yr ~ ",model_type))
+models <- map(timeframes_to_optimize,function(t){
+  lm(yieldspread,formula = paste0("return_",t,"_yr ~ ",model_type))
+})
 
 #Forecast returns on test set and convert to tidy data frame
 test_set <- tidify(test_set)
@@ -861,8 +842,7 @@ chartit(df = test_set,insample=F)
 
 #See if our model forecast performed better than a naive average
 compare_errors(df = test_set) %>% kable(caption = paste0("Comparing model forecast to naive forecast ",global_optimizer[[2]]))
-use_model <- case_when(compare_errors(df = test_set)[5,2] >= compare_errors(df = test_set)[5,3] &
-                         compare_errors(df = test_set)[2,2] >= compare_errors(df = test_set)[2,3] ~ F,
+use_model <- case_when(compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),2] >= compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),3]~F,
                        T ~ use_model)
 
 #Calculate model standard deviations
@@ -876,14 +856,13 @@ sds <- get_sds(df=test_set,use_model=use_model)
 yieldspread <- yieldspread_full %>%
   filter(symbol == ticker_to_study) %>%
   .[c("date","symbol",
-      "return_6_mo","return_1_yr","return_2_yr","return_3_yr",
+      paste0("return_",timeframes_to_optimize,"_yr"),
       varlist)]
 
 #Retrain the optimal model on the full training data set
-model_6mo <- lm(yieldspread,formula = paste0("return_6_mo ~ ",model_type))
-model_1yr <- lm(yieldspread,formula = paste0("return_1_yr ~ ",model_type))
-model_2yr <- lm(yieldspread,formula = paste0("return_2_yr ~ ",model_type))
-model_3yr <- lm(yieldspread,formula = paste0("return_3_yr ~ ",model_type))
+models <- map(timeframes_to_optimize,function(t){
+  lm(yieldspread,formula = paste0("return_",t,"_yr ~ ",model_type))
+})
 
 #Forecast returns on test set and convert to tidy data frame
 yieldspread <- tidify(yieldspread)
@@ -926,7 +905,7 @@ varlist <- c("us_spread","yield20yr","dxy","vix",
 yieldspread <- yieldspread_full %>%
   filter(symbol == ticker_to_study) %>%
   .[c("date","symbol",
-      "return_6_mo","return_1_yr","return_2_yr","return_3_yr",
+      paste0("return_",timeframes_to_optimize,"_yr"),
       varlist)]
 
 #Partition time series for training, testing, and validation
@@ -964,10 +943,9 @@ use_model <- case_when(errors$model[which.min(errors$mean_error)] == "naive_aver
 varlist <- varlist[str_detect(model_type,varlist)]
 
 #Retrain the optimal model on the full training data set
-model_6mo <- lm(yieldspread,formula = paste0("return_6_mo ~ ",model_type))
-model_1yr <- lm(yieldspread,formula = paste0("return_1_yr ~ ",model_type))
-model_2yr <- lm(yieldspread,formula = paste0("return_2_yr ~ ",model_type))
-model_3yr <- lm(yieldspread,formula = paste0("return_3_yr ~ ",model_type))
+models <- map(timeframes_to_optimize,function(t){
+  lm(yieldspread,formula = paste0("return_",t,"_yr ~ ",model_type))
+})
 
 #Forecast returns on test set and convert to tidy data frame
 test_set <- tidify(test_set)
@@ -978,8 +956,7 @@ chartit(df = test_set,insample=F)
 
 #See if our model forecast performed better than a naive average
 compare_errors(df = test_set) %>% kable(caption = paste0("Comparing model forecast to naive forecast ",global_optimizer[[2]]))
-use_model <- case_when(compare_errors(df = test_set)[5,2] >= compare_errors(df = test_set)[5,3] &
-                         compare_errors(df = test_set)[2,2] >= compare_errors(df = test_set)[2,3] ~ F,
+use_model <- case_when(compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),2] >= compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),3]~F,
                        T ~ use_model)
 
 #Calculate model standard deviations
@@ -993,14 +970,13 @@ sds <- get_sds(df=test_set,use_model=use_model)
 yieldspread <- yieldspread_full %>%
   filter(symbol == ticker_to_study) %>%
   .[c("date","symbol",
-      "return_6_mo","return_1_yr","return_2_yr","return_3_yr",
+      paste0("return_",timeframes_to_optimize,"_yr"),
       varlist)]
 
 #Retrain the optimal model on the full training data set
-model_6mo <- lm(yieldspread,formula = paste0("return_6_mo ~ ",model_type))
-model_1yr <- lm(yieldspread,formula = paste0("return_1_yr ~ ",model_type))
-model_2yr <- lm(yieldspread,formula = paste0("return_2_yr ~ ",model_type))
-model_3yr <- lm(yieldspread,formula = paste0("return_3_yr ~ ",model_type))
+models <- map(timeframes_to_optimize,function(t){
+  lm(yieldspread,formula = paste0("return_",t,"_yr ~ ",model_type))
+})
 
 #Forecast returns on test set and convert to tidy data frame
 yieldspread <- tidify(yieldspread)
@@ -1041,7 +1017,7 @@ varlist <- c("em_spread","em_govt_yield","dxy",
 yieldspread <- yieldspread_full %>%
   filter(symbol == ticker_to_study) %>%
   .[c("date","symbol",
-      "return_6_mo","return_1_yr","return_2_yr","return_3_yr",
+      paste0("return_",timeframes_to_optimize,"_yr"),
       varlist)]
 
 #Partition time series for training, testing, and validation
@@ -1079,10 +1055,9 @@ use_model <- case_when(errors$model[which.min(errors$mean_error)] == "naive_aver
 varlist <- varlist[str_detect(model_type,varlist)]
 
 #Retrain the optimal model on the full training data set
-model_6mo <- lm(yieldspread,formula = paste0("return_6_mo ~ ",model_type))
-model_1yr <- lm(yieldspread,formula = paste0("return_1_yr ~ ",model_type))
-model_2yr <- lm(yieldspread,formula = paste0("return_2_yr ~ ",model_type))
-model_3yr <- lm(yieldspread,formula = paste0("return_3_yr ~ ",model_type))
+models <- map(timeframes_to_optimize,function(t){
+  lm(yieldspread,formula = paste0("return_",t,"_yr ~ ",model_type))
+})
 
 #Forecast returns on test set and convert to tidy data frame
 test_set <- tidify(test_set)
@@ -1093,8 +1068,7 @@ chartit(df = test_set,insample=F)
 
 #See if our model forecast performed better than a naive average
 compare_errors(df = test_set) %>% kable(caption = paste0("Comparing model forecast to naive forecast ",global_optimizer[[2]]))
-use_model <- case_when(compare_errors(df = test_set)[5,2] >= compare_errors(df = test_set)[5,3] &
-                         compare_errors(df = test_set)[2,2] >= compare_errors(df = test_set)[2,3] ~ F,
+use_model <- case_when(compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),2] >= compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),3]~F,
                        T ~ use_model)
 
 #Calculate model standard deviations
@@ -1108,14 +1082,13 @@ sds <- get_sds(df=test_set,use_model=use_model)
 yieldspread <- yieldspread_full %>%
   filter(symbol == ticker_to_study) %>%
   .[c("date","symbol",
-      "return_6_mo","return_1_yr","return_2_yr","return_3_yr",
+      paste0("return_",timeframes_to_optimize,"_yr"),
       varlist)]
 
 #Retrain the optimal model on the full training data set
-model_6mo <- lm(yieldspread,formula = paste0("return_6_mo ~ ",model_type))
-model_1yr <- lm(yieldspread,formula = paste0("return_1_yr ~ ",model_type))
-model_2yr <- lm(yieldspread,formula = paste0("return_2_yr ~ ",model_type))
-model_3yr <- lm(yieldspread,formula = paste0("return_3_yr ~ ",model_type))
+models <- map(timeframes_to_optimize,function(t){
+  lm(yieldspread,formula = paste0("return_",t,"_yr ~ ",model_type))
+})
 
 #Forecast returns on test set and convert to tidy data frame
 yieldspread <- tidify(yieldspread)
@@ -1158,7 +1131,7 @@ varlist <- c("yield10yr","yield20yr","us_spread","us_ig_yield","dxy","vix",
 yieldspread <- yieldspread_full %>%
   filter(symbol == ticker_to_study) %>%
   .[c("date","symbol",
-      "return_6_mo","return_1_yr","return_2_yr","return_3_yr",
+      paste0("return_",timeframes_to_optimize,"_yr"),
       varlist)]
 
 #Partition time series for training, testing, and validation
@@ -1196,10 +1169,9 @@ use_model <- case_when(errors$model[which.min(errors$mean_error)] == "naive_aver
 varlist <- varlist[str_detect(model_type,varlist)]
 
 #Retrain the optimal model on the full training data set
-model_6mo <- lm(yieldspread,formula = paste0("return_6_mo ~ ",model_type))
-model_1yr <- lm(yieldspread,formula = paste0("return_1_yr ~ ",model_type))
-model_2yr <- lm(yieldspread,formula = paste0("return_2_yr ~ ",model_type))
-model_3yr <- lm(yieldspread,formula = paste0("return_3_yr ~ ",model_type))
+models <- map(timeframes_to_optimize,function(t){
+  lm(yieldspread,formula = paste0("return_",t,"_yr ~ ",model_type))
+})
 
 #Forecast returns on test set and convert to tidy data frame
 test_set <- tidify(test_set)
@@ -1210,8 +1182,7 @@ chartit(df = test_set,insample=F)
 
 #See if our model forecast performed better than a naive average
 compare_errors(df = test_set) %>% kable(caption = paste0("Comparing model forecast to naive forecast ",global_optimizer[[2]]))
-use_model <- case_when(compare_errors(df = test_set)[5,2] >= compare_errors(df = test_set)[5,3] &
-                         compare_errors(df = test_set)[2,2] >= compare_errors(df = test_set)[2,3] ~ F,
+use_model <- case_when(compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),2] >= compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),3]~F,
                        T ~ use_model)
 
 #Calculate model standard deviations
@@ -1225,14 +1196,13 @@ sds <- get_sds(df=test_set,use_model=use_model)
 yieldspread <- yieldspread_full %>%
   filter(symbol == ticker_to_study) %>%
   .[c("date","symbol",
-      "return_6_mo","return_1_yr","return_2_yr","return_3_yr",
+      paste0("return_",timeframes_to_optimize,"_yr"),
       varlist)]
 
 #Retrain the optimal model on the full training data set
-model_6mo <- lm(yieldspread,formula = paste0("return_6_mo ~ ",model_type))
-model_1yr <- lm(yieldspread,formula = paste0("return_1_yr ~ ",model_type))
-model_2yr <- lm(yieldspread,formula = paste0("return_2_yr ~ ",model_type))
-model_3yr <- lm(yieldspread,formula = paste0("return_3_yr ~ ",model_type))
+models <- map(timeframes_to_optimize,function(t){
+  lm(yieldspread,formula = paste0("return_",t,"_yr ~ ",model_type))
+})
 
 #Forecast returns on test set and convert to tidy data frame
 yieldspread <- tidify(yieldspread)
@@ -1272,7 +1242,7 @@ varlist <- c("em_spread","em_hy_yield","em_govt_yield","raw_materials","industri
 yieldspread <- yieldspread_full %>%
   filter(symbol == ticker_to_study) %>%
   .[c("date","symbol",
-      "return_6_mo","return_1_yr","return_2_yr","return_3_yr",
+      paste0("return_",timeframes_to_optimize,"_yr"),
       varlist)]
 
 #Partition time series for training, testing, and validation
@@ -1310,10 +1280,9 @@ use_model <- case_when(errors$model[which.min(errors$mean_error)] == "naive_aver
 varlist <- varlist[str_detect(model_type,varlist)]
 
 #Retrain the optimal model on the full training data set
-model_6mo <- lm(yieldspread,formula = paste0("return_6_mo ~ ",model_type))
-model_1yr <- lm(yieldspread,formula = paste0("return_1_yr ~ ",model_type))
-model_2yr <- lm(yieldspread,formula = paste0("return_2_yr ~ ",model_type))
-model_3yr <- lm(yieldspread,formula = paste0("return_3_yr ~ ",model_type))
+models <- map(timeframes_to_optimize,function(t){
+  lm(yieldspread,formula = paste0("return_",t,"_yr ~ ",model_type))
+})
 
 #Forecast returns on test set and convert to tidy data frame
 test_set <- tidify(test_set)
@@ -1324,8 +1293,7 @@ chartit(df = test_set,insample=F)
 
 #See if our model forecast performed better than a naive average
 compare_errors(df = test_set) %>% kable(caption = paste0("Comparing model forecast to naive forecast ",global_optimizer[[2]]))
-use_model <- case_when(compare_errors(df = test_set)[5,2] >= compare_errors(df = test_set)[5,3] &
-                         compare_errors(df = test_set)[2,2] >= compare_errors(df = test_set)[2,3] ~ F,
+use_model <- case_when(compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),2] >= compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),3]~F,
                        T ~ use_model)
 
 #Calculate model standard deviations
@@ -1339,14 +1307,13 @@ sds <- get_sds(df=test_set,use_model=use_model)
 yieldspread <- yieldspread_full %>%
   filter(symbol == ticker_to_study) %>%
   .[c("date","symbol",
-      "return_6_mo","return_1_yr","return_2_yr","return_3_yr",
+      paste0("return_",timeframes_to_optimize,"_yr"),
       varlist)]
 
 #Retrain the optimal model on the full training data set
-model_6mo <- lm(yieldspread,formula = paste0("return_6_mo ~ ",model_type))
-model_1yr <- lm(yieldspread,formula = paste0("return_1_yr ~ ",model_type))
-model_2yr <- lm(yieldspread,formula = paste0("return_2_yr ~ ",model_type))
-model_3yr <- lm(yieldspread,formula = paste0("return_3_yr ~ ",model_type))
+models <- map(timeframes_to_optimize,function(t){
+  lm(yieldspread,formula = paste0("return_",t,"_yr ~ ",model_type))
+})
 
 #Forecast returns on test set and convert to tidy data frame
 yieldspread <- tidify(yieldspread)
@@ -1391,7 +1358,7 @@ yieldspread <- yieldspread_full %>%
   filter(symbol == ticker_to_study) %>%
   mutate(em_ig_discount = us_hy_yield - em_ig_yield) %>%
   .[c("date","symbol",
-      "return_6_mo","return_1_yr","return_2_yr","return_3_yr",
+      paste0("return_",timeframes_to_optimize,"_yr"),
       varlist)]
 
 #Partition time series for training, testing, and validation
@@ -1429,10 +1396,9 @@ use_model <- case_when(errors$model[which.min(errors$mean_error)] == "naive_aver
 varlist <- varlist[str_detect(model_type,varlist)]
 
 #Retrain the optimal model on the full training data set
-model_6mo <- lm(yieldspread,formula = paste0("return_6_mo ~ ",model_type))
-model_1yr <- lm(yieldspread,formula = paste0("return_1_yr ~ ",model_type))
-model_2yr <- lm(yieldspread,formula = paste0("return_2_yr ~ ",model_type))
-model_3yr <- lm(yieldspread,formula = paste0("return_3_yr ~ ",model_type))
+models <- map(timeframes_to_optimize,function(t){
+  lm(yieldspread,formula = paste0("return_",t,"_yr ~ ",model_type))
+})
 
 #Forecast returns on test set and convert to tidy data frame
 test_set <- tidify(test_set)
@@ -1443,8 +1409,7 @@ chartit(df = test_set,insample=F)
 
 #See if our model forecast performed better than a naive average
 compare_errors(df = test_set) %>% kable(caption = paste0("Comparing model forecast to naive forecast ",global_optimizer[[2]]))
-use_model <- case_when(compare_errors(df = test_set)[5,2] >= compare_errors(df = test_set)[5,3] &
-                         compare_errors(df = test_set)[2,2] >= compare_errors(df = test_set)[2,3] ~ F,
+use_model <- case_when(compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),2] >= compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),3]~F,
                        T ~ use_model)
 
 #Calculate model standard deviations
@@ -1459,14 +1424,13 @@ yieldspread <- yieldspread_full %>%
   mutate(em_ig_discount = us_hy_yield - em_ig_yield) %>%
   filter(symbol == ticker_to_study) %>%
   .[c("date","symbol",
-      "return_6_mo","return_1_yr","return_2_yr","return_3_yr",
+      paste0("return_",timeframes_to_optimize,"_yr"),
       varlist)]
 
 #Retrain the optimal model on the full training data set
-model_6mo <- lm(yieldspread,formula = paste0("return_6_mo ~ ",model_type))
-model_1yr <- lm(yieldspread,formula = paste0("return_1_yr ~ ",model_type))
-model_2yr <- lm(yieldspread,formula = paste0("return_2_yr ~ ",model_type))
-model_3yr <- lm(yieldspread,formula = paste0("return_3_yr ~ ",model_type))
+models <- map(timeframes_to_optimize,function(t){
+  lm(yieldspread,formula = paste0("return_",t,"_yr ~ ",model_type))
+})
 
 #Forecast returns on test set and convert to tidy data frame
 yieldspread <- tidify(yieldspread)
@@ -1508,7 +1472,7 @@ varlist <- c("eur_spread","dxy","div_yield","raw_materials","industrial_material
 yieldspread <- yieldspread_full %>%
   filter(symbol == ticker_to_study) %>%
   .[c("date","symbol",
-      "return_6_mo","return_1_yr","return_2_yr","return_3_yr",
+      paste0("return_",timeframes_to_optimize,"_yr"),
       varlist)]
 
 #Partition time series for training, testing, and validation
@@ -1546,10 +1510,9 @@ use_model <- case_when(errors$model[which.min(errors$mean_error)] == "naive_aver
 varlist <- varlist[str_detect(model_type,varlist)]
 
 #Retrain the optimal model on the full training data set
-model_6mo <- lm(yieldspread,formula = paste0("return_6_mo ~ ",model_type))
-model_1yr <- lm(yieldspread,formula = paste0("return_1_yr ~ ",model_type))
-model_2yr <- lm(yieldspread,formula = paste0("return_2_yr ~ ",model_type))
-model_3yr <- lm(yieldspread,formula = paste0("return_3_yr ~ ",model_type))
+models <- map(timeframes_to_optimize,function(t){
+  lm(yieldspread,formula = paste0("return_",t,"_yr ~ ",model_type))
+})
 
 #Forecast returns on test set and convert to tidy data frame
 test_set <- tidify(test_set)
@@ -1560,8 +1523,7 @@ chartit(df = test_set,insample=F)
 
 #See if our model forecast performed better than a naive average
 compare_errors(df = test_set) %>% kable(caption = paste0("Comparing model forecast to naive forecast ",global_optimizer[[2]]))
-use_model <- case_when(compare_errors(df = test_set)[5,2] >= compare_errors(df = test_set)[5,3] &
-                         compare_errors(df = test_set)[2,2] >= compare_errors(df = test_set)[2,3] ~ F,
+use_model <- case_when(compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),2] >= compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),3]~F,
                        T ~ use_model)
 
 #Calculate model standard deviations
@@ -1575,14 +1537,13 @@ sds <- get_sds(df=test_set,use_model=use_model)
 yieldspread <- yieldspread_full %>%
   filter(symbol == ticker_to_study) %>%
   .[c("date","symbol",
-      "return_6_mo","return_1_yr","return_2_yr","return_3_yr",
+      paste0("return_",timeframes_to_optimize,"_yr"),
       varlist)]
 
 #Retrain the optimal model on the full training data set
-model_6mo <- lm(yieldspread,formula = paste0("return_6_mo ~ ",model_type))
-model_1yr <- lm(yieldspread,formula = paste0("return_1_yr ~ ",model_type))
-model_2yr <- lm(yieldspread,formula = paste0("return_2_yr ~ ",model_type))
-model_3yr <- lm(yieldspread,formula = paste0("return_3_yr ~ ",model_type))
+models <- map(timeframes_to_optimize,function(t){
+  lm(yieldspread,formula = paste0("return_",t,"_yr ~ ",model_type))
+})
 
 #Forecast returns on test set and convert to tidy data frame
 yieldspread <- tidify(yieldspread)
@@ -1663,8 +1624,7 @@ ggsave(filename = "multi-asset-model.jpg",
 
 # Near-term development ideas:
 
-# Rewrite my code in such a way that I can choose which return timeframes to
-# use by simply changing a variable.
+# Try out the spreads between various dividend/bond yields?
 
 # I need to handle tuning the change variables at the same time that I do
 # cross-validation for model building, so as to avoid overtraining. First train
