@@ -71,7 +71,7 @@ server <- function(input, output) {
       geom_line(linewidth=1) +
       scale_y_continuous(labels = scales::percent) +
       scale_x_date(date_breaks = "3 months", date_labels = "%b%y") +
-      labs(title="S&P 500 sector return (equal weight) during the Covid-19 pandemic",x="Date",y="Percent change",color="Sector") +
+      labs(title=paste0("S&P 500 sector return (",tolower(input$dropdown),") during the Covid-19 pandemic"),x="Date",y="Percent change",color="Sector") +
       theme_bw()
   })
 }
