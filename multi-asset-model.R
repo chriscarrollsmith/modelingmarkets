@@ -35,7 +35,7 @@ readRenviron("~/.Renviron")
 
 #Select what timeframes to optimize returns over (in years)
 #Use a comma-separated vector; optimally no more than four
-timeframes_to_optimize <- c(1)
+timeframes_to_optimize <- c(1,2)
 
 #Define function to get and combine multiple FRED series into a single data frame
 get_freds <- function(symbols,varnames){
@@ -220,7 +220,7 @@ chartit <- function(df=test_set,insample=F){
     geom_point(aes(y=adj_forecast,color=highlight,alpha=highlight),size=3) +
     geom_hline(aes(yintercept=adj_forecast,color=highlight,alpha=highlight),lwd=1,linetype="dashed") +
     geom_text(aes(y=adj_forecast,label=label),col="red",size=4,fontface = "bold",hjust="inward") +
-    facet_wrap(vars(timeframe),ncol=ceiling(length(timeframes_to_optimize)/2),nrow=ceiling(length(timeframes_to_optimize)/2)) +
+    facet_wrap(vars(timeframe),nrow=ceiling(length(timeframes_to_optimize)/2)) +
     labs(title=paste0(ticker_to_study," forward annualized rate of return (ARR) vs. ",focus_var),
          subtitle = paste0("Charted against ",
                      case_when(insample==F~"out-of-sample data",
@@ -416,6 +416,49 @@ cor(yieldspread_full[c("us_spread","em_spread","eur_spread")],use="complete.obs"
 
 
 
+# Assess money market returns ---------------------------------------------
+
+
+
+#Get money market returns, using .9 of Fed target range lower limit as a proxy
+money_market <- fredr("DFEDTARL",frequency = "m") %>%
+  select(date,value) %>%
+  mutate(value = (value/100)*.9) %>%
+  mutate(ahead_1mo = lead(value,1),
+         ahead_2mo = lead(value,2),
+         ahead_3mo = lead(value,3),
+         ahead_4mo = lead(value,4),
+         ahead_5mo = lead(value,5),
+         ahead_6mo = lead(value,6),
+         ahead_7mo = lead(value,7),
+         ahead_8mo = lead(value,8),
+         ahead_9mo = lead(value,9),
+         ahead_10mo = lead(value,10),
+         ahead_11mo = lead(value,11)) %>%
+  mutate(avg_1yr_return = rowMeans(.[,2:13])) %>%
+  mutate(timeframe = "1-year forward return") %>%
+  mutate(naive_forecast = mean(avg_1yr_return,na.rm=T)) %>%
+  mutate(forecast = predict(lm(avg_1yr_return ~ value,.),.))
+
+# #Predict and plot returns model
+money_market %>%
+  ggplot(aes(x=value,y=forecast)) +
+  geom_line(col="blue") +
+  geom_point(aes(y=avg_1yr_return))
+
+#Calculate Sharpe ratio
+expected_return <- last(money_market$forecast[!is.na(money_market$forecast)])
+expected_sd <- get_sds(money_market %>% filter(value > 0))[[1,2]]
+sharpes <- tibble(Ticker = "SPAXX",
+                      Model = "fed_rate",
+                      Timeframe = "1-year forward return",
+                      `Expected return` = expected_return,
+                      `Expected standard deviation` = expected_sd) %>%
+  mutate(`Expected Sharpe` = `Expected return`/`Expected standard deviation`)
+rm(expected_return,expected_sd,money_market)
+
+
+
 # Download price data -----------------------------------------------------
 
 
@@ -425,7 +468,7 @@ cor(yieldspread_full[c("us_spread","em_spread","eur_spread")],use="complete.obs"
 #To calculate CAGR c from simple annualized rate of return s, c=(s*y+1)^(1/y)-1
 #Or to get CAGR c from total return r, c=(r+1)^(1/y)-1
 #For now, use simple annualized rate of return
-prices <- tq_get(c("VOO","VGK","VIOO","VTWO","GOVT","VCLT","HYG","VWOB","EMHY","IEMG","TLT"))
+prices <- tq_get(c("VOO","VGK","VIOO","VTWO","GOVT","VCLT","HYG","VWOB","EMHY","IEMG","TLT","BSV"))
 prices <- map(timeframes_to_optimize,function(t){
   return <- prices %>%
     group_by(symbol) %>%
@@ -728,8 +771,8 @@ chartit(df = test_set,insample=F)
 
 #See if our model forecast performed better than a naive average
 compare_errors(df = test_set) %>% kable(caption = paste0("Comparing model forecast to naive forecast ",global_optimizer[[2]]))
-use_model <- case_when(compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),2] >= compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),3]~F,
-                       T ~ use_model)
+# use_model <- case_when(compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),2] >= compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),3]~F,
+#                        T ~ use_model)
 
 #Calculate model standard deviations
 sds <- get_sds(df=test_set,use_model=use_model)
@@ -754,7 +797,7 @@ models <- map(timeframes_to_optimize,function(t){
 yieldspread <- tidify(yieldspread)
 
 #Choose focus variable for charting, then create chart
-focus_var <- varlist[1]
+focus_var <- varlist[2]
 chartit(df = yieldspread,insample=T)
 
 #If sds are higher than when we plotted out of sample, use the higher value
@@ -766,7 +809,7 @@ sds <- sds %>%
 
 #Based on forecast returns, standard deviations, and risk-free rates, calculate
 #expected sharpe ratios
-sharpes <- get_sharpes()
+sharpes <- bind_rows(sharpes,get_sharpes())
 sharpes
 rm(sds)
 
@@ -778,7 +821,7 @@ rm(sds)
 
 #Define a ticker and a list of variables to study
 ticker_to_study <- "GOVT"
-varlist <- c("us_spread","yield7yr","dxy","vix",
+varlist <- c("us_spread","yield7yr","dxy","vix","spread7_10",
              "cli_lead_us","industrial_materials","raw_materials","us_pce_12m",
              "u_mich_inflation","breakeven_10yr","us_pce_3mo"
              # ,"change_in_us_equities_allocation","change_in_vix",
@@ -790,6 +833,8 @@ varlist <- c("us_spread","yield7yr","dxy","vix",
 #Filter dataset to keep only the data we're interested in
 yieldspread <- yieldspread_full %>%
   filter(symbol == ticker_to_study) %>%
+  mutate(spread7_10 = yield10yr - yield7yr) %>%
+  mutate(spread7_10 = (spread7_10-min(spread7_10,na.rm=T))/(max(spread7_10,na.rm=T)-min(spread7_10,na.rm=T))+1) %>%
   .[c("date","symbol",
       paste0("return_",timeframes_to_optimize,"_yr"),
       varlist)]
@@ -842,8 +887,8 @@ chartit(df = test_set,insample=F)
 
 #See if our model forecast performed better than a naive average
 compare_errors(df = test_set) %>% kable(caption = paste0("Comparing model forecast to naive forecast ",global_optimizer[[2]]))
-use_model <- case_when(compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),2] >= compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),3]~F,
-                       T ~ use_model)
+# use_model <- case_when(compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),2] >= compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),3]~F,
+#                        T ~ use_model)
 
 #Calculate model standard deviations
 sds <- get_sds(df=test_set,use_model=use_model)
@@ -854,6 +899,8 @@ sds <- get_sds(df=test_set,use_model=use_model)
 
 #Filter dataset to keep only the data we're interested in
 yieldspread <- yieldspread_full %>%
+  mutate(spread7_10 = yield10yr - yield7yr) %>%
+  mutate(spread7_10 = (spread7_10-min(spread7_10,na.rm=T))/(max(spread7_10,na.rm=T)-min(spread7_10,na.rm=T))+1) %>%
   filter(symbol == ticker_to_study) %>%
   .[c("date","symbol",
       paste0("return_",timeframes_to_optimize,"_yr"),
@@ -884,6 +931,123 @@ sharpes <- bind_rows(sharpes,get_sharpes())
 sharpes
 rm(sds)
 
+
+
+# Analyze BSV Returns ----------------------------------------------------
+
+
+
+#Define a ticker and a list of variables to study
+ticker_to_study <- "BSV"
+varlist <- c("us_spread","yield2yr","yield3yr","dxy","vix","spread2_10",
+             "cli_lead_us","industrial_materials","raw_materials","us_pce_12m",
+             "u_mich_inflation","breakeven_10yr","us_pce_3mo"
+             # ,"change_in_us_equities_allocation","change_in_vix",
+             # "change_in_fed_bs","change_in_dxy",
+             # "change_in_industrial_materials","change_in_raw_materials",
+             # "change_in_brent_crude","change_in_nat_gas"
+)
+
+#Filter dataset to keep only the data we're interested in
+yieldspread <- yieldspread_full %>%
+  filter(symbol == ticker_to_study) %>%
+  mutate(spread2_10 = yield10yr - yield2yr) %>%
+  mutate(spread2_10 = (spread2_10-min(spread2_10,na.rm=T))/(max(spread2_10,na.rm=T)-min(spread2_10,na.rm=T))+1) %>%
+  .[c("date","symbol",
+      paste0("return_",timeframes_to_optimize,"_yr"),
+      varlist)]
+
+#Partition time series for training, testing, and validation
+test_set <- yieldspread[yieldspread$date >= max(yieldspread$date) - years(4),]
+yieldspread <- yieldspread[yieldspread$date < max(yieldspread$date) - years(4),]
+
+#Calculate correlation coefficients between variables of interest and next-period return
+cors <- corchecker(df = yieldspread,
+                   ticker = ticker_to_study,
+                   vars_to_test = varlist)
+
+#Print correlation coefficients in readable format
+cors %>%
+  knitr::kable(caption = paste("Correlation coefficients for various variables and next-period",ticker_to_study,"returns"))
+
+# #Winnow list of variables to study, keeping only the top 5
+# varlist <- row.names(cors[1:5,])
+
+#Delete correlation coefficients table from workspace
+rm(cors)
+
+#Call function to use five-fold cross-validation to compare error rates on linear
+#models that combine the selected variables
+errors <- cross_validator(varlist)
+
+#Choose model that minimizes error on average
+errors <- errors %>%
+  group_by(model) %>%
+  summarize(mean_error = mean(error_measure)) %>%
+  arrange(mean_error)
+errors %>% knitr::kable(caption = paste("Mean",global_optimizer[[2]],"by model"))
+model_type <- errors$model[errors$model != "naive_average"][which.min(errors$mean_error[errors$model != "naive_average"])]
+use_model <- case_when(errors$model[which.min(errors$mean_error)] == "naive_average" ~ F,
+                       T ~ T)
+varlist <- varlist[str_detect(model_type,varlist)]
+
+#Retrain the optimal model on the full training data set
+models <- map(timeframes_to_optimize,function(t){
+  lm(yieldspread,formula = paste0("return_",t,"_yr ~ ",model_type))
+})
+
+#Forecast returns on test set and convert to tidy data frame
+test_set <- tidify(test_set)
+
+#Choose focus variable for charting, then create chart
+focus_var <- varlist[1]
+chartit(df = test_set,insample=F)
+
+#See if our model forecast performed better than a naive average
+compare_errors(df = test_set) %>% kable(caption = paste0("Comparing model forecast to naive forecast ",global_optimizer[[2]]))
+# use_model <- case_when(compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),2] >= compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),3]~F,
+#                        T ~ use_model)
+
+#Calculate model standard deviations
+sds <- get_sds(df=test_set,use_model=use_model)
+
+#Retrain yield spread model on full data set (without partitioning), chart
+#historical forecast against historical data, and forecast returns and sharpe
+#ratio for the current date
+
+#Filter dataset to keep only the data we're interested in
+yieldspread <- yieldspread_full %>%
+  mutate(spread2_10 = yield10yr - yield2yr) %>%
+  mutate(spread2_10 = (spread2_10-min(spread2_10,na.rm=T))/(max(spread2_10,na.rm=T)-min(spread2_10,na.rm=T))+1) %>%
+  filter(symbol == ticker_to_study) %>%
+  .[c("date","symbol",
+      paste0("return_",timeframes_to_optimize,"_yr"),
+      varlist)]
+
+#Retrain the optimal model on the full training data set
+models <- map(timeframes_to_optimize,function(t){
+  lm(yieldspread,formula = paste0("return_",t,"_yr ~ ",model_type))
+})
+
+#Forecast returns on test set and convert to tidy data frame
+yieldspread <- tidify(yieldspread)
+
+#Choose focus variable for charting, then create chart
+focus_var <- varlist[1]
+chartit(df = yieldspread,insample=T)
+
+#If sds are higher than when we plotted out of sample, use the higher value
+sds <- sds %>%
+  mutate(comparer = get_sds(df=yieldspread,print=F,use_model=use_model)$Model) %>%
+  mutate(Model = case_when(Model > comparer~Model,
+                           T~comparer)) %>%
+  select(-comparer)
+
+#Based on forecast returns, standard deviations, and risk-free rates, calculate
+#expected sharpe ratios
+sharpes <- bind_rows(sharpes,get_sharpes())
+sharpes
+rm(sds)
 
 
 # Analyze TLT Returns ----------------------------------------------------
@@ -956,8 +1120,8 @@ chartit(df = test_set,insample=F)
 
 #See if our model forecast performed better than a naive average
 compare_errors(df = test_set) %>% kable(caption = paste0("Comparing model forecast to naive forecast ",global_optimizer[[2]]))
-use_model <- case_when(compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),2] >= compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),3]~F,
-                       T ~ use_model)
+# use_model <- case_when(compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),2] >= compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),3]~F,
+#                        T ~ use_model)
 
 #Calculate model standard deviations
 sds <- get_sds(df=test_set,use_model=use_model)
@@ -1068,8 +1232,8 @@ chartit(df = test_set,insample=F)
 
 #See if our model forecast performed better than a naive average
 compare_errors(df = test_set) %>% kable(caption = paste0("Comparing model forecast to naive forecast ",global_optimizer[[2]]))
-use_model <- case_when(compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),2] >= compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),3]~F,
-                       T ~ use_model)
+# use_model <- case_when(compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),2] >= compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),3]~F,
+#                        T ~ use_model)
 
 #Calculate model standard deviations
 sds <- get_sds(df=test_set,use_model=use_model)
@@ -1182,8 +1346,8 @@ chartit(df = test_set,insample=F)
 
 #See if our model forecast performed better than a naive average
 compare_errors(df = test_set) %>% kable(caption = paste0("Comparing model forecast to naive forecast ",global_optimizer[[2]]))
-use_model <- case_when(compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),2] >= compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),3]~F,
-                       T ~ use_model)
+# use_model <- case_when(compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),2] >= compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),3]~F,
+#                        T ~ use_model)
 
 #Calculate model standard deviations
 sds <- get_sds(df=test_set,use_model=use_model)
@@ -1293,8 +1457,8 @@ chartit(df = test_set,insample=F)
 
 #See if our model forecast performed better than a naive average
 compare_errors(df = test_set) %>% kable(caption = paste0("Comparing model forecast to naive forecast ",global_optimizer[[2]]))
-use_model <- case_when(compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),2] >= compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),3]~F,
-                       T ~ use_model)
+# use_model <- case_when(compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),2] >= compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),3]~F,
+#                        T ~ use_model)
 
 #Calculate model standard deviations
 sds <- get_sds(df=test_set,use_model=use_model)
@@ -1344,7 +1508,7 @@ rm(sds)
 #Define a ticker and a list of variables to study
 ticker_to_study <- "IEMG"
 varlist <- c("em_spread","div_yield","em_govt_yield","em_ig_discount","dxy",
-             "raw_materials","industrial_materials"
+             "raw_materials","industrial_materials","div_premium"
              # ,"change_in_dxy","change_in_industrial_materials",
              # "change_in_raw_materials","change_in_brent_crude",
              # "change_in_nat_gas"
@@ -1357,6 +1521,13 @@ varlist <- c("em_spread","div_yield","em_govt_yield","em_ig_discount","dxy",
 yieldspread <- yieldspread_full %>%
   filter(symbol == ticker_to_study) %>%
   mutate(em_ig_discount = us_hy_yield - em_ig_yield) %>%
+  full_join(yieldspread_full %>%
+              filter(symbol %in% c(ticker_to_study,"VOO")) %>%
+              select(date,symbol,div_yield) %>%
+              spread(symbol,div_yield) %>%
+              mutate(div_premium = IEMG - VOO) %>%
+              mutate(div_premium = (div_premium-min(div_premium,na.rm=T))/(max(div_premium,na.rm=T)-min(div_premium,na.rm=T))+1) %>%
+              select(date,div_premium)) %>%
   .[c("date","symbol",
       paste0("return_",timeframes_to_optimize,"_yr"),
       varlist)]
@@ -1409,8 +1580,8 @@ chartit(df = test_set,insample=F)
 
 #See if our model forecast performed better than a naive average
 compare_errors(df = test_set) %>% kable(caption = paste0("Comparing model forecast to naive forecast ",global_optimizer[[2]]))
-use_model <- case_when(compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),2] >= compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),3]~F,
-                       T ~ use_model)
+# use_model <- case_when(compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),2] >= compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),3]~F,
+#                        T ~ use_model)
 
 #Calculate model standard deviations
 sds <- get_sds(df=test_set,use_model=use_model)
@@ -1421,8 +1592,15 @@ sds <- get_sds(df=test_set,use_model=use_model)
 
 #Filter dataset to keep only the data we're interested in
 yieldspread <- yieldspread_full %>%
-  mutate(em_ig_discount = us_hy_yield - em_ig_yield) %>%
   filter(symbol == ticker_to_study) %>%
+  mutate(em_ig_discount = us_hy_yield - em_ig_yield) %>%
+  full_join(yieldspread_full %>%
+              filter(symbol %in% c(ticker_to_study,"VOO")) %>%
+              select(date,symbol,div_yield) %>%
+              spread(symbol,div_yield) %>%
+              mutate(div_premium = IEMG - VOO) %>%
+              mutate(div_premium = (div_premium-min(div_premium,na.rm=T))/(max(div_premium,na.rm=T)-min(div_premium,na.rm=T))+1) %>%
+              select(date,div_premium)) %>%
   .[c("date","symbol",
       paste0("return_",timeframes_to_optimize,"_yr"),
       varlist)]
@@ -1523,8 +1701,8 @@ chartit(df = test_set,insample=F)
 
 #See if our model forecast performed better than a naive average
 compare_errors(df = test_set) %>% kable(caption = paste0("Comparing model forecast to naive forecast ",global_optimizer[[2]]))
-use_model <- case_when(compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),2] >= compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),3]~F,
-                       T ~ use_model)
+# use_model <- case_when(compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),2] >= compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),3]~F,
+#                        T ~ use_model)
 
 #Calculate model standard deviations
 sds <- get_sds(df=test_set,use_model=use_model)
@@ -1583,7 +1761,9 @@ sharpes %>%
                                    Ticker=="VGK"~"EU Stocks",
                                    Ticker=="VOO"~"US Stocks",
                                    Ticker=="EMHY"~"EM HY Bonds",
-                                   Ticker=="VWOB"~"EM Govt Bonds")) %>%
+                                   Ticker=="VWOB"~"EM Govt Bonds",
+                                   Ticker=="BSV"~"Short-Term US Govt Bonds",
+                                   Ticker=="SPAXX"~"Money-Market")) %>%
   select(`Asset class`,Ticker,Model,`Expected return`,`Expected standard deviation`,`Expected Sharpe`) %>%
   arrange(desc(`Expected Sharpe`)) %>%
   kable(caption = "Sharpe ratios, 1-year timeframe")
@@ -1598,7 +1778,9 @@ sharpes %>%
                             Ticker=="VGK"~"VGK\nEU Stocks",
                             Ticker=="VOO"~"VOO\nUS Stocks",
                             Ticker=="EMHY"~"EMHY\nMed-Term\nEM HY\nBonds",
-                            Ticker=="VWOB"~"VWOB\nMed-Term\nEM Govt\nBonds")) %>%
+                            Ticker=="VWOB"~"VWOB\nMed-Term\nEM Govt\nBonds",
+                            Ticker=="BSV"~"Short-Term\nUS Govt\nBonds",
+                            Ticker=="SPAXX"~"Money-\nMarket")) %>%
   mutate(`Index ETF` = fct_reorder(`Index ETF`,`Expected return`,.desc=T)) %>%
   ggplot(aes(x=`Index ETF`,y=`Expected return`)) +
   geom_col(fill="lightblue") +
@@ -1624,7 +1806,15 @@ ggsave(filename = "multi-asset-model.jpg",
 
 # Near-term development ideas:
 
+# Maybe just remove the VGK special dividend?
+# Europe natural gas data series lags by 1-2 months, unfortunately. Either add a month
+# to all dates, use Henry Hub spot price from FRED instead, or find a series of
+# TTF gas spot prices that I can scrape with rvest and convert to US dollars
+
+# Since Yahoo! Finance dividend data starts at 2013, go back to fetching from Nasdaq.com
+
 # Try out the spreads between various dividend/bond yields?
+# See if I can get data on dividend yield futures?
 
 # I need to handle tuning the change variables at the same time that I do
 # cross-validation for model building, so as to avoid overtraining. First train
