@@ -5,8 +5,9 @@
 #tidy charts and tables
 library(tidyverse)
 library(shiny)
+library(plotly)
 
-#Save data for pulling into a Shiny app
+#Read data from file for displaying in Shiny app
 refactorer <- readRDS(paste0(getwd(),"/data/refactorer.rds"))
 sector_df <- readRDS(paste0(getwd(),"/data/sector_df.rds"))
 
@@ -52,7 +53,7 @@ ui <- fluidPage(
     # Main panel for displaying outputs ----
     mainPanel(
       # Output: Histogram ----
-      plotOutput(outputId = "sectorsPlot")
+      plotlyOutput(outputId = "sectorsPlot")
     )
   )
 )
@@ -60,19 +61,20 @@ ui <- fluidPage(
 # Define server logic required to draw a histogram ----
 server <- function(input, output) {
   # Reactive line chart of sector returns since beginning of Covid-19 pandemic
-  output$sectorsPlot <- renderPlot({
+  output$sectorsPlot <- renderPlotly({
     sector_df %>%
       filter(weight == input$dropdown) %>%
       filter(sector %in% input$checkboxes) %>%
+      mutate(sector = factor(sector,levels=case_when(input$dropdown == "Equal weight"~refactorer[[1]][[1]][refactorer[[1]][[1]] %in% input$checkboxes],
+                                                     T~refactorer[[2]][[1]][refactorer[[2]][[1]] %in% input$checkboxes]))) %>%
       mutate(return = return - 1) %>%
-      mutate(sector = factor(sector,levels=case_when(input$dropdown == "Equal weight"~refactorer[[1]],
-                                                     T~refactorer[[2]]))) %>%
-      ggplot(aes(x = date,y = return,color=sector)) +
-      geom_line(linewidth=1) +
-      scale_y_continuous(labels = scales::percent) +
-      scale_x_date(date_breaks = "3 months", date_labels = "%b%y") +
-      labs(title=paste0("S&P 500 sector return (",tolower(input$dropdown),") during the Covid-19 pandemic"),x="Date",y="Percent change",color="Sector") +
-      theme_bw()
+      plot_ly(x=~date,y=~return,type="scatter",mode="lines",color=~sector,
+              hoverinfo="x+y+text",text=~sector,
+              colors=case_when(input$dropdown == "Equal weight"~refactorer[[1]][[2]][refactorer[[1]][[1]] %in% input$checkboxes],
+                               T~refactorer[[2]][[2]][refactorer[[2]][[1]] %in% input$checkboxes])) %>%
+      layout(title=list(text=paste0("S&P 500 sector return (",tolower(input$dropdown),") during the Covid-19 pandemic"),x=0),
+             xaxis=list(title="Date",tickformat="%b%y",tickmode="auto",tickfont=list(size=8),dtick="M3"),
+             yaxis=list(title="Percent change",tickformat=".2%"))
   })
 }
 
