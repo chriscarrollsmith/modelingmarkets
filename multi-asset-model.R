@@ -326,8 +326,6 @@ get_sharpes <- function(){
 
 
 #Get a bunch of variables from FRED to test as model inputs
-#Convert percentage values to decimal
-#Get rid of negative values that will screw up log transformation
 yieldspread_full <- get_freds(symbols = c("BAMLH0A0HYM2","BAMLEMHYHYLCRPIUSOAS",
                                           "BAMLHE00EHYIOAS","BAMLH0A0HYM2EY",
                                           "BAMLEMHBHYCRPIEY","BAMLC0A0CMEY",
@@ -359,6 +357,7 @@ yieldspread_full <- get_freds(symbols = c("BAMLH0A0HYM2","BAMLEMHYHYLCRPIUSOAS",
                                            "eur_cpi_12mo","us_pce_12m",
                                            "u_mich_inflation","breakeven_10yr",
                                            "us_pce_3mo","eur_cpi_3mo")) %>%
+  #Convert percentage values to decimal
   mutate(value = case_when(variable %in% c("us_spread","em_spread",
                                            "eur_spread","us_hy_yield",
                                            "em_hy_yield","us_ig_yield",
@@ -369,7 +368,32 @@ yieldspread_full <- get_freds(symbols = c("BAMLH0A0HYM2","BAMLEMHYHYLCRPIUSOAS",
                                            "eur_cpi_12mo","us_pce_12m",
                                            "u_mich_inflation","breakeven_10yr")~value/100,
                            T~value)) %>%
+  #Adjust dates for FRED series to reflect release dates, not reference dates
+  mutate(date = case_when(variable %in% c("eur_cli","industrial_materials",
+                                          "raw_materials","nat_gas",
+                                          "us_pce_12m","us_pce_3mo",
+                                          "u_mich_inflation")~date %m+% months(2),
+                          variable %in% c("cli_lead_us","breakeven_10yr")~date %m+% months(1) %m+% days(6),
+                          variable %in% c("us_spread","em_spread",
+                                          "eur_spread","us_hy_yield",
+                                          "em_hy_yield","us_ig_yield",
+                                          "em_ig_yield","em_govt_yield",
+                                          "eur_hy_yield","eur_10yr_yield",
+                                          "yield6mo","yield1yr",
+                                          "yield2yr","yield3yr",
+                                          "yield7yr","yield10yr","yield20yr",
+                                          "vix")~date %m+% days(1),
+                          variable == "us_equities_allocation"~date %m+% months(2) %m+% days(6),
+                          variable %in% c("brent_crude","ecb_bs")~date %m+% days(7),
+                          variable %in% c("usd_eur","dxy","fed_bs")~date %m+% days(4),
+                          variable %in% c("eur_cpi_12mo")~date %m+% months(2) %m+% weeks(2),
+                          variable %in% c("eur_cpi_3mo")~date %m+% months(1) %m+% weeks(3),
+                          T~date)) %>%
+  mutate(date = case_when(date > Sys.Date()~Sys.Date(),
+                          T~date)) %>%
+  #Rearrange table for ML model training
   spread(key = variable,value=value) %>%
+  #Get rid of negative values that will screw up log transformation
   mutate(cli_lead_us = (cli_lead_us-min(cli_lead_us,na.rm=T))/(max(cli_lead_us,na.rm=T)-min(cli_lead_us,na.rm=T))+1,
          eur_cli = (eur_cli-min(eur_cli,na.rm=T))/(max(eur_cli,na.rm=T)-min(eur_cli,na.rm=T))+1,
          eur_cpi_12mo = (eur_cpi_12mo-min(eur_cpi_12mo,na.rm=T))/(max(eur_cpi_12mo,na.rm=T)-min(eur_cpi_12mo,na.rm=T))+1)
@@ -463,12 +487,33 @@ rm(expected_return,expected_sd,money_market)
 
 
 
-#Get historical price data and calculate next period return
+#Get historical price data
+prices <- tq_get(c("VOO","VGK","VIOO","VTWO","GOVT","VCLT","HYG","VWOB","EMHY","IEMG","TLT","BSV"))
+
+# get today's prices
+last_price <- getQuote(c("VOO","VGK","VIOO","VTWO","GOVT","VCLT","HYG","VWOB","EMHY","IEMG","TLT","BSV")) %>%
+  clean_names() %>%
+  mutate(symbol = rownames(.),
+         date = as.Date(trade_time),
+         close=last,
+         adjusted=last) %>%
+  mutate(open = round(open,digits=2),
+         high = round(high,digits=2),
+         low = round(low,digits=2),
+         close = round(close,digits=2),
+         adjusted = round(adjusted,digits=2)) %>%
+  select(symbol,date,open,high,low,close,adjusted,volume)
+
+#Combine today's prices with the price history data frame
+prices <- if(max(last_price$date) > max(prices$date)){
+  bind_rows(prices,last_price)
+}else{prices}
+
+#calculate next period return
 #To calculate simple annualized rate of return s from total y-year return r, s=r/y
 #To calculate CAGR c from simple annualized rate of return s, c=(s*y+1)^(1/y)-1
 #Or to get CAGR c from total return r, c=(r+1)^(1/y)-1
 #For now, use simple annualized rate of return
-prices <- tq_get(c("VOO","VGK","VIOO","VTWO","GOVT","VCLT","HYG","VWOB","EMHY","IEMG","TLT","BSV"))
 prices <- map(timeframes_to_optimize,function(t){
   return <- prices %>%
     group_by(symbol) %>%
@@ -1779,7 +1824,7 @@ sharpes %>%
                             Ticker=="VOO"~"VOO\nUS Stocks",
                             Ticker=="EMHY"~"EMHY\nMed-Term\nEM HY\nBonds",
                             Ticker=="VWOB"~"VWOB\nMed-Term\nEM Govt\nBonds",
-                            Ticker=="BSV"~"Short-Term\nUS Govt\nBonds",
+                            Ticker=="BSV"~"BSV\nShort-Term\nUS Govt\nBonds",
                             Ticker=="SPAXX"~"Money-\nMarket")) %>%
   mutate(`Index ETF` = fct_reorder(`Index ETF`,`Expected return`,.desc=T)) %>%
   ggplot(aes(x=`Index ETF`,y=`Expected return`)) +
@@ -1806,6 +1851,10 @@ ggsave(filename = "multi-asset-model.jpg",
 
 # Near-term development ideas:
 
+# Quite a few FRED series update on a lag from the actual release (e.g., commodities
+# prices). Try to figure out how to scrape the actual release to get a faster/
+# fresher signal.
+
 # Maybe just remove the VGK special dividend?
 # Europe natural gas data series lags by 1-2 months, unfortunately. Either add a month
 # to all dates, use Henry Hub spot price from FRED instead, or find a series of
@@ -1827,7 +1876,7 @@ ggsave(filename = "multi-asset-model.jpg",
 # Explore using P/E or earnings yield rather than div yield to predict index returns?
 # (Dividend yield is problematic because it's a poor proxy for shareholder yield)
 # Can I find a higher-frequency P/E series than multpl.com? Can I find series for
-# Europe & EM?
+# Europe & EM? Earnings yield preferable to P/E.
 
 # Try reverse repo, maybe with a stochastic transformation
 
