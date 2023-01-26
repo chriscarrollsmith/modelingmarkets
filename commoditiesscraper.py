@@ -69,7 +69,7 @@ measures.index.name = 'measure'
 measures.reset_index(inplace=True)
 
 # Save cleaned dataframe as an Excel file with multiple worksheets
-with pd.ExcelWriter("IMFcommodities.xlsx") as writer:
+with pd.ExcelWriter("commoditiesscraper.xlsx") as writer:
     df.to_excel(writer, sheet_name="Dataset", index=False)
     commodities.to_excel(writer, sheet_name="Commodities", index=False)
     measures.to_excel(writer, sheet_name="Measures", index=False)
