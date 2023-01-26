@@ -1854,6 +1854,7 @@ ggsave(filename = "multi-asset-model.jpg",
 # Quite a few FRED series update on a lag from the actual release (e.g., commodities
 # prices). Try to figure out how to scrape the actual release to get a faster/
 # fresher signal.
+# https://datahelp.imf.org/knowledgebase/articles/1968408-how-to-use-the-api-python-and-r
 
 # Maybe just remove the VGK special dividend?
 # Europe natural gas data series lags by 1-2 months, unfortunately. Either add a month
