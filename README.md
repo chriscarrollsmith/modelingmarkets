@@ -5,7 +5,7 @@ By Christopher C. Smith
 
 INTRODUCTION
 
-The modelingmarkets repo contains financial data analysis work by Christopher Carroll Smith. Chris writes about quantitative finance on Substack at https://modelingmarkets.substack.com/. He also podcasts about finance on the Wall Street Petting Zoo podcast, available through your favorite podcasting app. Code is created primarily in R, with future projects planned in Python. Code is free to use with proper acknowledgement of authorship under terms of the Apache 2.0 license. Sample output is included for each script.
+The modelingmarkets repo contains financial data analysis work by Christopher Carroll Smith. Chris writes about quantitative finance on Substack at https://modelingmarkets.substack.com/. He also podcasts about finance on the Wall Street Petting Zoo podcast, available through your favorite podcasting app. Code is created in R and Python. Sample outputs are included in the repo. Code is free to use with proper acknowledgement of authorship under terms of the Apache 2.0 license.
 
 SCRIPTS FOUND IN THIS REPOSITORY
 
