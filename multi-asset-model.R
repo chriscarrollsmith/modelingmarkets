@@ -389,9 +389,9 @@ yieldspread_full <- get_freds(symbols = c("BAMLH0A0HYM2","BAMLEMHYHYLCRPIUSOAS",
                           variable %in% c("eur_cpi_12mo")~date %m+% months(2) %m+% weeks(2),
                           variable %in% c("eur_cpi_3mo")~date %m+% months(1) %m+% weeks(3),
                           T~date)) %>%
-  mutate(date = case_when(date > Sys.Date()~Sys.Date(),
-                          T~date)) %>%
-  #Rearrange table for ML model training
+  group_by(variable) %>%
+  mutate(date = if(any(date > as.numeric(Sys.Date()))){date - (max(date) - Sys.Date())}else{date}) %>%
+  ungroup() %>%
   spread(key = variable,value=value) %>%
   #Get rid of negative values that will screw up log transformation
   mutate(cli_lead_us = (cli_lead_us-min(cli_lead_us,na.rm=T))/(max(cli_lead_us,na.rm=T)-min(cli_lead_us,na.rm=T))+1,
