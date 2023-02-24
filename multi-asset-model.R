@@ -138,7 +138,7 @@ cross_validator <- function(variables_to_study){
 
     #Omit from training set any returns that overlap the first date in test set
     train_set <- map2(1:length(timeframes_to_optimize),timeframes_to_optimize,function(a,b){
-      train_set[[a]][[paste0("return_",b,"_yr")]] <- suppressWarnings(case_when(between(test_set[[a]]$date[1] - train_set[[a]]$date,0,365*b)~NA_real_,
+      train_set[[a]][[paste0("return_",b,"_yr")]] <- suppressWarnings(case_when(between(as.numeric(test_set[[a]]$date[1] - train_set[[a]]$date),0,365*b)~NA_real_,
                                            T~train_set[[a]][[paste0("return_",b,"_yr")]]))
       return(train_set[[a]])
     })
@@ -181,7 +181,7 @@ tidify <- function(df){
     mutate(forecast = predict(object=models[[first(index)]],newdata=cur_data())) %>%
     ungroup() %>%
     filter(!is.na(forecast)) %>%
-    mutate(label = case_when(date == max(date) ~ paste0(scales::percent(round(forecast,2),accuracy=1)," expected\n,",time_length,"-year ARR"),
+    mutate(label = case_when(date == max(date) ~ paste0(scales::percent(round(forecast,2),accuracy=1)," expected\n",time_length,"-year ARR"),
                              TRUE ~ NA_character_)) %>%
     mutate(timeframe = paste0(time_length,"-year forward return")) %>%
     mutate(timeframe = factor(timeframe,levels=paste0(timeframes_to_optimize,"-year forward return"))) %>%
@@ -216,9 +216,9 @@ chartit <- function(df=test_set,insample=F){
     mutate(highlight = !is.na(label)) %>%
     ggplot(aes(x=.data[[focus_var]],y=value)) +
     geom_point() +
-    geom_line(aes(y=adj_forecast),col="blue",lwd=1) +
+    geom_line(aes(y=adj_forecast),col="blue",linewidth=1) +
     geom_point(aes(y=adj_forecast,color=highlight,alpha=highlight),size=3) +
-    geom_hline(aes(yintercept=adj_forecast,color=highlight,alpha=highlight),lwd=1,linetype="dashed") +
+    geom_hline(aes(yintercept=adj_forecast,color=highlight,alpha=highlight),linewidth=1,linetype="dashed") +
     geom_text(aes(y=adj_forecast,label=label),col="red",size=4,fontface = "bold",hjust="inward") +
     facet_wrap(vars(timeframe),nrow=ceiling(length(timeframes_to_optimize)/2)) +
     labs(title=paste0(ticker_to_study," forward annualized rate of return (ARR) vs. ",focus_var),
@@ -277,7 +277,7 @@ get_sds <- function(df = test_set,print=T,use_model=T){
 
 #Define function to calculate expected sharpe ratios from forecasted returns,
 #standard deviations, and risk-free rates
-get_sharpes <- function(){
+get_sharpes <- function(adjuster = 0){
 
   #Join sds table with risk-free rate table
   sds <- sds %>%
@@ -290,7 +290,8 @@ get_sharpes <- function(){
     forecasts <- yieldspread %>%
       filter(!is.na(forecast)) %>%
       filter(date == max(date)) %>%
-      select(timeframe,forecast)
+      select(timeframe,forecast) %>%
+      mutate(forecast=forecast-adjuster)
   }else{
     forecasts <- yieldspread %>%
       filter(!is.na(naive_forecast)) %>%
@@ -317,6 +318,25 @@ get_sharpes <- function(){
            `Expected return` = forecast,
            `Expected standard deviation` = model_sd,
            `Expected Sharpe` = model_sharpe)
+}
+
+#Get adjustment factor in the event we don't have an up-to-date forecast
+get_adjustment_factor <- function(ticker){
+  if(max(yieldspread$date[yieldspread$date %in% yieldspread_full$date[yieldspread_full$symbol == ticker & !is.na(yieldspread_full$adjusted)] & !is.na(yieldspread$forecast)]) <
+     max(yieldspread_full$date[yieldspread_full$symbol == ticker & !is.na(yieldspread_full$adjusted)])){
+    forecast_dates <- yieldspread$date[!is.na(yieldspread$forecast)]
+    price_at_last_forecast <- yieldspread_full %>%
+      filter(symbol == ticker & date %in% forecast_dates & !is.na(adjusted)) %>%
+      filter(date == max(date)) %>%
+      pull(adjusted)
+    price_at_last_price <- yieldspread_full %>%
+      filter(symbol == ticker & !is.na(adjusted)) %>%
+      filter(date == max(date)) %>%
+      pull(adjusted)
+    (price_at_last_forecast-price_at_last_price)/price_at_last_forecast
+  }else{
+    return(0)
+  }
 }
 
 
@@ -374,15 +394,7 @@ yieldspread_full <- get_freds(symbols = c("BAMLH0A0HYM2","BAMLEMHYHYLCRPIUSOAS",
                                           "us_pce_12m","us_pce_3mo",
                                           "u_mich_inflation")~date %m+% months(2),
                           variable %in% c("cli_lead_us","breakeven_10yr")~date %m+% months(1) %m+% days(6),
-                          variable %in% c("us_spread","em_spread",
-                                          "eur_spread","us_hy_yield",
-                                          "em_hy_yield","us_ig_yield",
-                                          "em_ig_yield","em_govt_yield",
-                                          "eur_hy_yield","eur_10yr_yield",
-                                          "yield6mo","yield1yr",
-                                          "yield2yr","yield3yr",
-                                          "yield7yr","yield10yr","yield20yr",
-                                          "vix")~date %m+% days(1),
+                          variable %in% c("vix")~date %m+% days(1),
                           variable == "us_equities_allocation"~date %m+% months(2) %m+% days(6),
                           variable %in% c("brent_crude","ecb_bs")~date %m+% days(7),
                           variable %in% c("usd_eur","dxy","fed_bs")~date %m+% days(4),
@@ -642,15 +654,26 @@ yieldspread_full <- yieldspread_full %>%
   filter(!is.na(symbol)) %>%
   arrange(date)
 
-#Interpolate last non-NA value for model inputs (but *not* for returns)
+#Interpolate last non-NA value for bond yield model inputs, not carrying forward
+#after the last NA
+walk(.x = c("yield6mo","em_govt_yield","em_hy_yield",
+      "yield1yr","yield2yr","yield3yr","yield7yr","em_ig_yield","eur_hy_yield",
+      "eur_10yr_yield","us_hy_yield","us_ig_yield","yield10yr","yield20yr"),
+    .f = function(varname){
+      last_non_na <- last(which(!is.na(yieldspread_full[[varname]])))
+      yieldspread_full[[varname]][1:last_non_na] <- na.locf(yieldspread_full[[varname]][1:last_non_na],na.rm=F)
+      rm(last_non_na)
+    }
+)
+
+#Interpolate last non-NA value for other model inputs, carrying forward after
+#the last NA
 #(Why am I ending up with missing values for some of these?)
 yieldspread_full <- yieldspread_full %>%
   fill(us_spread,em_spread,eur_spread,cli_lead_us,us_equities_allocation,
-       industrial_materials,raw_materials,yield6mo,em_govt_yield,em_hy_yield,
-       yield1yr,yield2yr,yield3yr,yield7yr,vix,dxy,em_ig_yield,fed_bs,
-       brent_crude,usd_eur,nat_gas,eur_hy_yield,ecb_bs,eur_10yr_yield,eur_cli,
-       us_hy_yield,us_ig_yield,yield10yr,yield20yr,us_pce_12m,eur_cpi_12mo,
-       u_mich_inflation,breakeven_10yr,us_pce_3mo,eur_cpi_3mo) %>%
+       industrial_materials,raw_materials,vix,dxy,fed_bs,brent_crude,usd_eur,
+       nat_gas,ecb_bs,eur_cli,us_pce_12m,eur_cpi_12mo,u_mich_inflation,
+       breakeven_10yr,us_pce_3mo,eur_cpi_3mo) %>%
   group_by(symbol) %>%
   fill(div_yield)
 
@@ -854,7 +877,120 @@ sds <- sds %>%
 
 #Based on forecast returns, standard deviations, and risk-free rates, calculate
 #expected sharpe ratios
-sharpes <- bind_rows(sharpes,get_sharpes())
+sharpes <- bind_rows(sharpes,get_sharpes(adjuster = get_adjustment_factor("VOO")))
+sharpes
+rm(sds)
+
+
+# Analyze S&P 600 Returns -------------------------------------------------
+
+
+
+#Define a ticker and a list of variables to study
+ticker_to_study <- "VIOO"
+varlist <- c("us_spread","yield7yr","dxy","vix","div_yield",
+             "cli_lead_us","industrial_materials","raw_materials","us_pce_12m",
+             "u_mich_inflation","breakeven_10yr","us_pce_3mo"
+             # ,"change_in_us_equities_allocation","change_in_vix",
+             # "change_in_fed_bs","change_in_dxy",
+             # "change_in_industrial_materials","change_in_raw_materials",
+             # "change_in_brent_crude","change_in_nat_gas"
+)
+
+#Filter dataset to keep only the data we're interested in
+yieldspread <- yieldspread_full %>%
+  filter(symbol == ticker_to_study) %>%
+  .[c("date","symbol",
+      paste0("return_",timeframes_to_optimize,"_yr"),
+      varlist)]
+
+#Partition time series for training, testing, and validation
+test_set <- yieldspread[yieldspread$date >= max(yieldspread$date) - years(4),]
+yieldspread <- yieldspread[yieldspread$date < max(yieldspread$date) - years(4),]
+
+#Calculate correlation coefficients between variables of interest and next-period return
+cors <- yieldspread %>%
+  corchecker(ticker = ticker_to_study,
+             vars_to_test = varlist)
+
+#Print correlation coefficients in readable format
+cors %>%
+  knitr::kable(caption = paste("Correlation coefficients for various variables and next-period",ticker_to_study,"returns"))
+
+# #Winnow list of variables to study, keeping only the top 5
+# varlist <- row.names(cors[1:5,])
+
+#Delete correlation coefficients table from workspace
+rm(cors)
+
+#Call function to use five-fold cross-validation to compare error rates on linear
+#models that combine the selected variables
+errors <- cross_validator(varlist)
+
+#Choose model that minimizes error on average
+errors <- errors %>%
+  group_by(model) %>%
+  summarize(mean_error = mean(error_measure)) %>%
+  arrange(mean_error)
+errors %>% filter(rank(mean_error)<=10) %>% knitr::kable(caption = paste("Mean",global_optimizer[[2]],"by model"))
+model_type <- errors$model[errors$model != "naive_average"][which.min(errors$mean_error[errors$model != "naive_average"])]
+use_model <- case_when(errors$model[which.min(errors$mean_error)] == "naive_average" ~ F,
+                       T ~ T)
+varlist <- varlist[str_detect(model_type,varlist)]
+
+#Retrain the optimal model on the full training data set
+models <- map(timeframes_to_optimize,function(t){
+  lm(yieldspread,formula = paste0("return_",t,"_yr ~ ",model_type))
+})
+
+#Forecast returns on test set and convert to tidy data frame
+test_set <- tidify(test_set)
+
+#Choose focus variable for charting, then create chart
+focus_var <- varlist[1]
+chartit(df = test_set,insample=F)
+
+#See if our model forecast performed better than a naive average
+compare_errors(df = test_set) %>% kable(caption = paste0("Comparing model forecast to naive forecast ",global_optimizer[[2]]))
+# use_model <- case_when(compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),2] >= compare_errors(df = test_set)[nrow(compare_errors(df = test_set)),3]~F,
+#                        T ~ use_model)
+
+#Calculate model standard deviations
+sds <- get_sds(df=test_set,use_model=use_model)
+
+#Retrain yield spread model on full data set (without partitioning), chart
+#historical forecast against historical data, and forecast returns and sharpe
+#ratio for the current date
+
+#Filter dataset to keep only the data we're interested in
+yieldspread <- yieldspread_full %>%
+  filter(symbol == ticker_to_study) %>%
+  .[c("date","symbol",
+      paste0("return_",timeframes_to_optimize,"_yr"),
+      varlist)]
+
+#Retrain the optimal model on the full training data set
+models <- map(timeframes_to_optimize,function(t){
+  lm(yieldspread,formula = paste0("return_",t,"_yr ~ ",model_type))
+})
+
+#Forecast returns on test set and convert to tidy data frame
+yieldspread <- tidify(yieldspread)
+
+#Choose focus variable for charting, then create chart
+focus_var <- varlist[2]
+chartit(df = yieldspread,insample=T)
+
+#If sds are higher than when we plotted out of sample, use the higher value
+sds <- sds %>%
+  mutate(comparer = get_sds(df=yieldspread,print=F,use_model=use_model)$Model) %>%
+  mutate(Model = case_when(Model > comparer~Model,
+                           T~comparer)) %>%
+  select(-comparer)
+
+#Based on forecast returns, standard deviations, and risk-free rates, calculate
+#expected sharpe ratios
+sharpes <- bind_rows(sharpes,get_sharpes(adjuster = get_adjustment_factor("VIOO")))
 sharpes
 rm(sds)
 
@@ -972,7 +1108,7 @@ sds <- sds %>%
 
 #Based on forecast returns, standard deviations, and risk-free rates, calculate
 #expected sharpe ratios
-sharpes <- bind_rows(sharpes,get_sharpes())
+sharpes <- bind_rows(sharpes,get_sharpes(get_adjustment_factor("GOVT")))
 sharpes
 rm(sds)
 
@@ -1804,6 +1940,7 @@ sharpes %>%
                                    Ticker=="IEMG"~"EM Stocks",
                                    Ticker=="VCLT"~"Long-Term US Corp Bonds",
                                    Ticker=="VGK"~"EU Stocks",
+                                   Ticker=="VIOO"~"US Small Caps",
                                    Ticker=="VOO"~"US Stocks",
                                    Ticker=="EMHY"~"EM HY Bonds",
                                    Ticker=="VWOB"~"EM Govt Bonds",
@@ -1822,6 +1959,7 @@ sharpes %>%
                             Ticker=="VCLT"~"VCLT\nLong-Term\nUS Corp\nBonds",
                             Ticker=="VGK"~"VGK\nEU Stocks",
                             Ticker=="VOO"~"VOO\nUS Stocks",
+                            Ticker=="VIOO"~"VIOO\nUS Small Caps",
                             Ticker=="EMHY"~"EMHY\nMed-Term\nEM HY\nBonds",
                             Ticker=="VWOB"~"VWOB\nMed-Term\nEM Govt\nBonds",
                             Ticker=="BSV"~"BSV\nShort-Term\nUS Govt\nBonds",
@@ -1850,6 +1988,14 @@ ggsave(filename = "multi-asset-model.jpg",
 
 
 # Near-term development ideas:
+
+# FRED download sometimes fails randomly for different variables.
+# Add a check-and-redownload step.
+
+# Try adding unemployment as an additional variable. Also look at US Census
+# Household Survey for possible variables
+
+# cur_data() has been deprecated; look into replacing with pick()
 
 # Quite a few FRED series update on a lag from the actual release (e.g., commodities
 # prices). Try to figure out how to scrape the actual release to get a faster/
