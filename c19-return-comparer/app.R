@@ -74,7 +74,8 @@ server <- function(input, output) {
                                T~refactorer[[2]][[2]][refactorer[[2]][[1]] %in% input$checkboxes])) %>%
       layout(title=list(text=paste0("S&P 500 sector return (",tolower(input$dropdown),") during the Covid-19 pandemic"),x=0),
              xaxis=list(title="Date",tickformat="%b%y",tickmode="auto",tickfont=list(size=8),dtick="M3"),
-             yaxis=list(title="Percent change",tickformat=".2%"))
+             yaxis=list(title="Percent change",tickformat=".2%"),
+             legend=list(x=0,y=1,font = list(size = 10)))
   })
 }
 
