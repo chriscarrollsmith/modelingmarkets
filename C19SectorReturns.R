@@ -42,8 +42,8 @@ refactorer[[2]] <- sector_df %>%
   select(sector,color_code)
 
 #Save data for pulling into a Shiny app
-# saveRDS(refactorer,paste0(getwd(),"/c19-return-comparer/data/refactorer.rds"))
-# saveRDS(sector_df,paste0(getwd(),"/c19-return-comparer/data/sector_df.rds"))
+saveRDS(refactorer,paste0(getwd(),"/c19-return-comparer/data/refactorer.rds"))
+saveRDS(sector_df,paste0(getwd(),"/c19-return-comparer/data/sector_df.rds"))
 
 #Read data from file
 # refactorer <- readRDS(paste0(getwd(),"/c19-return-comparer/data/refactorer.rds"))

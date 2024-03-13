@@ -10,6 +10,8 @@ library(plotly)
 #Read data from file for displaying in Shiny app
 refactorer <- readRDS(paste0(getwd(),"/data/refactorer.rds"))
 sector_df <- readRDS(paste0(getwd(),"/data/sector_df.rds"))
+refactorer[[1]]$sector <- stringr::str_replace_all(refactorer[[1]]$sector," ","\n")
+refactorer[[2]]$sector <- stringr::str_replace_all(refactorer[[2]]$sector," ","\n")
 
 # Define UI for app that draws a histogram ----
 ui <- fluidPage(
@@ -62,20 +64,25 @@ ui <- fluidPage(
 server <- function(input, output) {
   # Reactive line chart of sector returns since beginning of Covid-19 pandemic
   output$sectorsPlot <- renderPlotly({
+    inputs <- stringr::str_replace_all(input$checkboxes," ","\n")
+    print(inputs)
     sector_df %>%
       filter(weight == input$dropdown) %>%
-      filter(sector %in% input$checkboxes) %>%
-      mutate(sector = factor(sector,levels=case_when(input$dropdown == "Equal weight"~refactorer[[1]][[1]][refactorer[[1]][[1]] %in% input$checkboxes],
-                                                     T~refactorer[[2]][[1]][refactorer[[2]][[1]] %in% input$checkboxes]))) %>%
+      mutate(sector = stringr::str_replace_all(sector," ","\n")) %>%
+      filter(sector %in% inputs) %>%
+      mutate(sector = factor(sector,levels=case_when(input$dropdown == "Equal weight"~refactorer[[1]][[1]][refactorer[[1]][[1]] %in% inputs],
+                                                     T~refactorer[[2]][[1]][refactorer[[2]][[1]] %in% inputs]))) %>%
       mutate(return = return - 1) %>%
       plot_ly(x=~date,y=~return,type="scatter",mode="lines",color=~sector,
               hoverinfo="x+y+text",text=~sector,
-              colors=case_when(input$dropdown == "Equal weight"~refactorer[[1]][[2]][refactorer[[1]][[1]] %in% input$checkboxes],
-                               T~refactorer[[2]][[2]][refactorer[[2]][[1]] %in% input$checkboxes])) %>%
+              colors=case_when(input$dropdown == "Equal weight"~refactorer[[1]][[2]][refactorer[[1]][[1]] %in% inputs],
+                               T~refactorer[[2]][[2]][refactorer[[2]][[1]] %in% inputs])) %>%
       layout(title=list(text=paste0("S&P 500 sector return (",tolower(input$dropdown),") during the Covid-19 pandemic"),x=0),
              xaxis=list(title="Date",tickformat="%b%y",tickmode="auto",tickfont=list(size=8),dtick="M3"),
-             yaxis=list(title="Percent change",tickformat=".2%"),
-             legend=list(x=0,y=1,font = list(size = 10)))
+             yaxis=list(title="Percent change",tickformat=".2%")
+             #,legend=list(x=0,y=1,font = list(size = 10) #For legend inside chart
+             #,legend=list(y=-0.5,orientation="h") #For legend under chart
+             )
   })
 }
 

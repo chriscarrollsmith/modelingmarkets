@@ -1,8 +1,11 @@
 ---
 title: "Forecasting 10-year US Treasury yield and S&P 500 P/E from PCE inflation rate"
 author: "Christopher C. Smith"
-date: '2022-12-31'
-output: pdf_document
+date: "2022-12-31"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
 ---
 
 ```{r setup, include=FALSE, echo=FALSE, message=FALSE, warning=FALSE}
@@ -51,13 +54,14 @@ joined_df <- inner_join(tenyr_df,pce_df) %>%
          sequence = row_number())
 
 #Predict 10-year yield based on this simple log regression model using PCE rate
-fit <- joined_df %>% lm(mean_yield ~ twelve_month_pce, data = .)
+fit <- joined_df %>% lm(mean_yield ~ log(twelve_month_pce), data = .)
 initial_predicted_yield <- predict(fit,newdata=data.frame(twelve_month_pce = last(joined_df$twelve_month_pce)))
+joined_df <- joined_df %>% mutate(predicted_yield = predict(fit,newdata=data.frame(twelve_month_pce = joined_df$twelve_month_pce)))
 ```
 
 ## Introduction
 
-A version of this chart made the rounds earlier this year, as inflation soared. Plot historical 10-year bond yields against historical PCE inflation rates, run a simple log regression, and voila! Bond yields are still way too low, and *voila!* today’s 10-year yield should be `r paste(round(initial_predicted_yield,1),"%",sep="")`!
+A version of this chart made the rounds in 2022, as inflation soared. Plot historical 10-year bond yields against historical PCE inflation rates, run a simple log regression, and voila! Bond yields are way too low! Today’s 10-year yield should be `r paste(round(initial_predicted_yield,1),"%",sep="")`!
 
 But this is not quite right.
 
@@ -116,7 +120,7 @@ joined_df %>%
   labs(x="Date",y="Residual Monthly Average 10-Year Yield",title="Residual 10-Year Yield over Time after Subtracting PCE Inflation-Rate\nLog Regression Model")
 ```
 
-Running a multiple regression on our data will give us a combined model that incorporates both the PCE inflation rate effect and the time effect. But should we use log regression, linear regression, or some combination of the two? To find out, we use a machine learning method called five-fold cross-validation. This involves partitioning the data ten times, with 80% of the data in a training set, and the other 20% in a testing set. Then we run regression models on the training data and use them to make predictions on the testing data, and we choose the model that, on average, minimizes the root mean squared error of predictions across all five trials.
+Running a multiple regression on our data will give us a combined model that incorporates both the PCE inflation rate effect and the time effect. But should we use log regression, linear regression, or some combination of the two? To find out, we use a machine learning method called five-fold cross-validation. This involves partitioning the data five times, with 80% of the data in a training set, and the other 20% in a testing set. Then we run regression models on the training data and use them to make predictions on the testing data, and we choose the model that, on average, minimizes the root mean squared error of predictions across all five trials.
 
 ```{r cross-validation, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
 
@@ -192,7 +196,7 @@ A more sophisticated model would attempt to disambiguate these things, but that 
 
 ## Implications for Bond Market Valuations
 
-Subtracting all time effects prior to the current date, we can re-plot our original plot of 10-year bond yields against historical PCE inflation rates, this time controlling for changes in yields over time. As the chart shows, our model's predicted 10-year yield at about `r paste(round(final_predicted_yield,1),"%",sep="")` is a little below today's roughly `r paste(round(last(tenyr_df$mean_yield),1),"%",sep="")` yield, and far below the approximately `r paste(round(initial_predicted_yield,1),"%",sep="")` yield predicted by a log regression on the PCE inflation rate without controlling for the change in yields over time.
+Subtracting all time effects prior to the current date, we can re-plot our original plot of 10-year bond yields against historical PCE inflation rates, this time controlling for changes in yields over time. As the chart shows, our model's predicted 10-year yield at about `r paste(round(final_predicted_yield,1),"%",sep="")` is substantially below today's roughly `r paste(round(last(tenyr_df$mean_yield),1),"%",sep="")` yield.
 
 ```{r chart_6, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
 #Subtract all time effects prior to the present
@@ -208,7 +212,7 @@ joined_df %>%
 
 ```
 
-To be sure, the 10-year yield could go much higher. The dispersion of data on our chart is wide. However, this analysis suggests that the 10-year bond may be fairly priced or even slightly underpriced for the current level of inflation, making this a reasonable time to invest in 10-year bonds.
+To be sure, the 10-year yield could go higher, especially if PCE inflation rises. The dispersion of data on our chart is wide. However, this analysis suggests that the 10-year bond may be underpriced for the current level of inflation, making this a reasonable time to invest in 10-year bonds.
 
 ## Implications for Stock Market Valuations
 
@@ -226,7 +230,7 @@ pe <- "https://www.multpl.com/s-p-500-pe-ratio/table/by-month" %>%
   as.data.frame()
 names(pe) <- c("date","pe")
 pe <- pe %>%
-  mutate(pe = str_remove_all(pe,"[a-z]")) %>%
+  mutate(pe = str_remove_all(pe,"[^0-9.]")) %>%
   mutate(pe = as.numeric(pe)) %>%
   mutate(date = as.Date(date,format = "%b %d, %Y"))
 if(month(pe$date[1])==month(pe$date[2])){
@@ -281,9 +285,9 @@ predicted_pe <- predict(fit,newdata=data.frame(twelve_month_pce = last(pe_joined
 predicted_pe2 <- predict(fit,newdata=data.frame(twelve_month_pce = last(pe_joined$twelve_month_pce),mean_yield = final_predicted_yield))
 ```
 
-The winning model is a double linear regression. We retrain this model on the whole dataset and predict P/E. Based on today's 10-year yield and PCE inflation rate, S&P 500 P/E should be `r round(predicted_pe,1)`. This is slightly higher than the actual P/E of `r round(last(pe_joined$pe),1)` (represented by the red dot in the chart below), which suggests the S&P 500 is slightly undervalued.
+The winning model is a double linear regression. We retrain this model on the whole dataset and predict P/E. Based on today's 10-year yield and PCE inflation rate, S&P 500 P/E should be `r round(predicted_pe,1)`. This is `r if(predicted_pe > last(pe_joined$pe)){"higher"} else if(predicted_pe < last(pe_joined$pe)){"lower"} else {"equal"}` than the actual P/E of `r round(last(pe_joined$pe),1)` (represented by the red dot in the chart below), which suggests the S&P 500 is `r if(predicted_pe > last(pe_joined$pe)){"undervalued"} else if(predicted_pe < last(pe_joined$pe)){"overvalued"} else {"valued correctly"}`.
 
-Furthermore, we can also predict that fair value for the S&P 500 would be even higher if the 10-year yield were to come down from its current `r paste(round(last(tenyr_df$mean_yield),1),"%",sep="")` rate to the `r paste(round(final_predicted_yield,1),"%",sep="")` rate predicted by our yield forecasting model. In that event, we would expect S&P 500 P/E to rise to `r round(predicted_pe2,1)` (represented by the green dot in the chart below).
+However, our view of bond market mispricing has implications for stock market valuation as well. If the 10-year Treasury yield moved from its current `r paste(round(last(tenyr_df$mean_yield),1),"%",sep="")` rate to the `r paste(round(final_predicted_yield,1),"%",sep="")` rate predicted by our yield forecasting model, we would expect S&P 500 P/E to adjust to `r round(predicted_pe2,1)` (represented by the green dot in the chart below). This `r if((predicted_pe > last(pe_joined$pe)) == (predicted_pe2 > last(pe_joined$pe))){"still "}` suggests the S&P 500 is `r if(predicted_pe2 > last(pe_joined$pe)){"undervalued"} else if(round(predicted_pe2,1) < last(pe_joined$pe)){"overvalued"} else {"valued correctly"}`.
 
 ```{r chart_7, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
 #Plot current P/E vs. model prediction
@@ -300,8 +304,6 @@ pe_joined %>%
   labs(x="10-year Treasury yield",y="S&P 500 P/E",title="S&P 500 P/E vs. 10-year Treasury yield, adjusted for PCE inflation\nrate")
 
 ```
-
-We can thus conclude that the S&P 500, like the US 10-year bond, may be moderately undervalued here.
 
 ## Bibliography
 
